@@ -1,0 +1,138 @@
+Start testing: Sep 13 11:09 EDT
+----------------------------------------------------------
+1/9 Testing: master_blaster_drive
+1/9 Test: master_blaster_drive
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "drive"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_drive" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_drive" end time: Sep 13 11:09 EDT
+"master_blaster_drive" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/9 Testing: master_blaster_mix
+2/9 Test: master_blaster_mix
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "mix"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_mix" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_mix" end time: Sep 13 11:09 EDT
+"master_blaster_mix" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/9 Testing: master_blaster_crush
+3/9 Test: master_blaster_crush
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "crush"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_crush" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_crush" end time: Sep 13 11:09 EDT
+"master_blaster_crush" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/9 Testing: master_blaster_maps
+4/9 Test: master_blaster_maps
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "maps"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_maps" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_maps" end time: Sep 13 11:09 EDT
+"master_blaster_maps" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/9 Testing: master_blaster_stability
+5/9 Test: master_blaster_stability
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "stability"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_stability" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_stability" end time: Sep 13 11:09 EDT
+"master_blaster_stability" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/9 Testing: master_blaster_tuning
+6/9 Test: master_blaster_tuning
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "tuning"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_tuning" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_tuning" end time: Sep 13 11:09 EDT
+"master_blaster_tuning" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/9 Testing: master_blaster_stereo
+7/9 Test: master_blaster_stereo
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "stereo"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_stereo" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_stereo" end time: Sep 13 11:09 EDT
+"master_blaster_stereo" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/9 Testing: master_blaster_compression
+8/9 Test: master_blaster_compression
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "compression"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_compression" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_compression" end time: Sep 13 11:09 EDT
+"master_blaster_compression" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/9 Testing: master_blaster_buzz
+9/9 Test: master_blaster_buzz
+Command: "/Users/jfroome/projects/kastle2/build-tests/master_blaster_tests" "buzz"
+Directory: /Users/jfroome/projects/kastle2/build-tests
+"master_blaster_buzz" start time: Sep 13 11:09 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"master_blaster_buzz" end time: Sep 13 11:09 EDT
+"master_blaster_buzz" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 13 11:09 EDT
