@@ -30,22 +30,18 @@ SOFTWARE.
 #include "common/core/Hardware.hpp"
 #include "common/core/Kastle2.hpp"
 #include "common/dsp/math/qmath.hpp"
+#include "MasterBlasterDsp.hpp"
 
 namespace kastle2
 {
 
+/**
+ * @brief Mastering chain: saturation -> tone -> bus compressor -> vinyl -> lo-fi -> width -> mix -> limiter.
+ * See MasterBlaster.md for the control map.
+ */
 class AppMasterBlaster : public virtual App
 {
 public:
-    enum class Mode
-    {
-        WARM,
-        MASTER,
-        CRUSH,
-        BYPASS,
-        COUNT
-    };
-
     void Init();
     void DeInit();
     FASTCODE void AudioLoop(q15_t *input, q15_t *output, size_t size);
@@ -59,20 +55,12 @@ public:
     }
 
 private:
+    bool ReadParam(int32_t &param, Hardware::Pot pot, Hardware::Layer layer);
+
     bool inited_ = false;
-    Mode mode_ = Mode::WARM;
-
-    int32_t drive_ = 12000;
-    int32_t warmth_ = 8000;
-    int32_t mix_ = 20000;
-    int32_t glue_ = 11000;
-    int32_t wow_ = 4000;
-    int32_t crush_ = 6000;
-    int32_t output_ = 18000;
-    int32_t stereo_width_ = 5000;
-    int32_t master_comp_ = 12000;
-
-    uint32_t sample_counter_ = 0;
+    masterblaster::Chain chain_;
+    masterblaster::Params knobs_; // Knob positions, CV is added on top
+    masterblaster::BypassToggle bypass_toggle_;
 };
 
 }

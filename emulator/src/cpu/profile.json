@@ -1,0 +1,73 @@
+{
+  "clock_hz": 176000000,
+  "block_frames": 48,
+  "sample_rate": 44000,
+  "budget_cycles_per_block": 192000,
+  "model": "Cortex-M0+ instruction timings on the real -O3 firmware build; no flash/XIP cache, bus contention, hardware divider or bootrom float model",
+  "apps": {
+    "masterblaster": {
+      "scenarios": [
+        {
+          "name": "defaults",
+          "description": "All knobs at 50 %, demo-style stereo noise input",
+          "core0_audio": {
+            "mean": 51877.71,
+            "p99": 52065,
+            "max": 52646
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 13875.740833333333,
+            "p99": 13905.75,
+            "max": 13908.25
+          },
+          "blocks": 300
+        },
+        {
+          "name": "all knobs max",
+          "description": "All seven knobs at 100 %",
+          "core0_audio": {
+            "mean": 51879.70333333333,
+            "p99": 52065,
+            "max": 52648
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 31104.180833333332,
+            "p99": 31132.75,
+            "max": 31135.25
+          },
+          "blocks": 300
+        },
+        {
+          "name": "all knobs min",
+          "description": "All seven knobs at 0 %",
+          "core0_audio": {
+            "mean": 48244.63333333333,
+            "p99": 48430,
+            "max": 49033
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 11176.040833333333,
+            "p99": 11208.75,
+            "max": 11211.25
+          },
+          "blocks": 300
+        }
+      ]
+    }
+  }
+}

@@ -29,3 +29,6 @@ Desktop.ini
 
 # CLion
 .idea
+
+# Host test build
+build-tests/

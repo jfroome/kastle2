@@ -1,268 +1,527 @@
-#include <array>
+// Host tests for the real MasterBlaster DSP (MasterBlasterDsp.cpp is compiled into this executable).
+
 #include <cmath>
 #include <cstdint>
-#include <iostream>
-#include <string_view>
-#include <utility>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <set>
+#include <algorithm>
+#include <vector>
+
+#include "MasterBlasterDsp.hpp"
+
+using namespace kastle2::masterblaster;
 
 namespace
 {
-constexpr int32_t kQ15Max = 32767;
-constexpr int32_t kQ15Min = -32768;
+constexpr double kPi = 3.14159265358979323846;
+constexpr double kSampleRate = 44000.0;
 
-inline int32_t clamp_q15(int32_t value)
+std::vector<int32_t> Sine(size_t frames, double freq, double amplitude, bool right_too = true)
 {
-    if (value > kQ15Max)
-        return kQ15Max;
-    if (value < kQ15Min)
-        return kQ15Min;
-    return value;
-}
-
-inline int32_t soft_drive(int32_t sample, int32_t drive)
-{
-    int32_t gain = 32768 + drive;
-    int32_t staged = (sample * gain) >> 15;
-    staged = staged > kQ15Max ? kQ15Max : staged;
-    staged = staged < kQ15Min ? kQ15Min : staged;
-
-    int32_t compressed = staged;
-    if (compressed > 24576)
-        compressed = 24576 + ((compressed - 24576) >> 1);
-    else if (compressed < -24576)
-        compressed = -24576 + ((compressed + 24576) >> 1);
-
-    return clamp_q15(compressed);
-}
-
-inline int32_t mix_with_dry(int32_t dry, int32_t wet, int32_t mix)
-{
-    int32_t wet_gain = mix;
-    int32_t dry_gain = 32768 - mix;
-    return clamp_q15(((dry * dry_gain) + (wet * wet_gain)) >> 15);
-}
-
-inline int32_t bit_crush(int32_t sample, int32_t crush)
-{
-    int32_t depth = 16 - (crush >> 13);
-    if (depth < 3)
-        depth = 3;
-    if (depth > 15)
-        depth = 15;
-
-    int32_t shift = 16 - depth;
-    return clamp_q15((sample >> shift) << shift);
-}
-
-inline int32_t map_value(int32_t value, int32_t in_min, int32_t in_max, int32_t out_min, int32_t out_max)
-{
-    if (in_max == in_min)
-        return out_min;
-    int64_t result = (static_cast<int64_t>(value - in_min) * static_cast<int64_t>(out_max - out_min)) /
-                     static_cast<int64_t>(in_max - in_min) +
-                     static_cast<int64_t>(out_min);
-    return static_cast<int32_t>(result);
-}
-
-inline int32_t stereo_field_expander(int32_t left, int32_t right, int32_t width)
-{
-    int32_t mid = ((left + right) >> 1);
-    int32_t side = (left - right) >> 1;
-    int32_t spread = (side * width) >> 15;
-    return clamp_q15(mid + spread);
-}
-
-inline int32_t master_compress(int32_t sample, int32_t amount)
-{
-    int32_t magnitude = std::abs(sample);
-    const int32_t threshold = 22000;
-    if (magnitude <= threshold)
-        return clamp_q15(sample);
-
-    int32_t excess = magnitude - threshold;
-    int32_t ratio = 5 + ((amount * 10) >> 15);
-    int32_t reduced = threshold + (excess / ratio);
-    int32_t gain = (reduced * 32768) / std::max<int32_t>(1, magnitude);
-    return clamp_q15((sample * gain) >> 15);
-}
-
-inline bool check_output_buzz_guard()
-{
-    int32_t max_buzz = 0;
-    for (uint32_t i = 0; i < 2048; ++i)
+    std::vector<int32_t> buffer(frames * 2);
+    for (size_t i = 0; i < frames; i++)
     {
-        int32_t counter_offset = static_cast<int32_t>((i * 13u) & 0x1Fu) - 16;
-        int32_t buzz = counter_offset * 30;
-        if (std::abs(buzz) > max_buzz)
-            max_buzz = std::abs(buzz);
+        const int32_t v = static_cast<int32_t>(amplitude * 32767.0 * std::sin(2.0 * kPi * freq * i / kSampleRate));
+        buffer[2 * i] = v;
+        buffer[2 * i + 1] = right_too ? v : 0;
     }
-    return max_buzz < 1000;
+    return buffer;
 }
 
-int test_drive_monotonicity()
+// Runs the chain block by block (48 frames, like the firmware)
+std::vector<int32_t> Run(Chain &chain, const std::vector<int32_t> &input)
 {
-    const int32_t low = soft_drive(10000, 0);
-    const int32_t mid = soft_drive(10000, 12000);
-    const int32_t high = soft_drive(10000, 24000);
-    if (!(mid > low && high > mid))
-        return 1;
-    if (high > 32767 || low < -32768)
-        return 2;
-    return 0;
-}
-
-int test_mix_bounds_and_direction()
-{
-    const int32_t dry = 12000;
-    const int32_t wet = 16000;
-    const int32_t mixed = mix_with_dry(dry, wet, 22000);
-    if (mixed < -32768 || mixed > 32767)
-        return 3;
-    if (mixed == 0)
-        return 4;
-    return 0;
-}
-
-int test_bitcrush_reduction()
-{
-    const int32_t original = 30000;
-    const int32_t crushed = bit_crush(original, 20000);
-    const int32_t crushed_more = bit_crush(original, 30000);
-    if (crushed < -32768 || crushed > 32767)
-        return 5;
-    if (!(std::abs(crushed) <= std::abs(original)))
-        return 6;
-    if (!(std::abs(crushed_more) <= std::abs(crushed)))
-        return 7;
-    return 0;
-}
-
-int test_pot_maps_are_valid()
-{
-    const int32_t drive = map_value(0, 0, 4095, 2500, 26000);
-    const int32_t out_gain = map_value(4095, 0, 4095, 12000, 32767);
-    if (drive < 0 || drive > 32767)
-        return 8;
-    if (out_gain < 12000 || out_gain > 32767)
-        return 9;
-    return 0;
-}
-
-int test_signal_path_stays_stable()
-{
-    const std::array<int32_t, 6> inputs = {0, 1000, -1000, 8000, -8000, 30000};
-    for (int32_t value : inputs)
+    std::vector<int32_t> output(input.size());
+    const size_t frames = input.size() / 2;
+    for (size_t pos = 0; pos < frames; pos += 48)
     {
-        int32_t processed = mix_with_dry(value, soft_drive(value, 12000), 22000);
-        if (processed < -32768 || processed > 32767)
-            return 10;
+        const size_t n = (frames - pos < 48) ? frames - pos : 48;
+        chain.Process(input.data() + 2 * pos, output.data() + 2 * pos, n);
+    }
+    return output;
+}
+
+// Everything off / neutral
+Params Neutral()
+{
+    Params p;
+    p.drive = 0;
+    p.tone = 16384;
+    p.comp = 0;
+    p.vinyl = 0;
+    p.wow = 0;
+    p.lofi = 0;
+    p.width = 16384;
+    p.mix = kParamMax;
+    p.output = 23170;
+    p.bypass = false;
+    return p;
+}
+
+int32_t Peak(const std::vector<int32_t> &buffer, size_t from)
+{
+    int32_t peak = 0;
+    for (size_t i = from * 2; i < buffer.size(); i++)
+    {
+        peak = std::max(peak, std::abs(buffer[i]));
+    }
+    return peak;
+}
+
+#define CHECK(cond)                                                                \
+    do                                                                             \
+    {                                                                              \
+        if (!(cond))                                                               \
+        {                                                                          \
+            std::fprintf(stderr, "FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);  \
+            return 1;                                                              \
+        }                                                                          \
+    } while (0)
+
+int TestBounds()
+{
+    // Fuzz parameter corners with a full-scale square-ish + sine signal
+    std::vector<int32_t> input(2 * 8000);
+    for (size_t i = 0; i < 8000; i++)
+    {
+        input[2 * i] = ((i / 40) % 2) ? 32767 : -32768;
+        input[2 * i + 1] = static_cast<int32_t>(32767.0 * std::sin(i * 0.05));
+    }
+    uint32_t seed = 12345;
+    for (int trial = 0; trial < 300; trial++)
+    {
+        Params p;
+        int32_t *fields[] = {&p.drive, &p.tone,  &p.comp,   &p.comp_speed, &p.vinyl,
+                             &p.wow,   &p.lofi,  &p.width,  &p.mix,        &p.output};
+        for (int32_t *f : fields)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const uint32_t pick = (seed >> 24) % 3;
+            *f = pick == 0 ? 0 : (pick == 1 ? kParamMax : static_cast<int32_t>((seed >> 8) % 32768));
+        }
+        p.bypass = (trial % 7) == 0;
+        Chain chain;
+        chain.Init(p);
+        const auto out = Run(chain, input);
+        for (int32_t v : out)
+        {
+            CHECK(v >= -32768 && v <= 32767);
+        }
     }
     return 0;
 }
 
-int test_drive_tuning_is_subtle_then_drama()
+int TestSilence()
 {
-    const int32_t low_drive = map_value(0, 0, 4095, 1200, 34000);
-    const int32_t high_drive = map_value(4095, 0, 4095, 1200, 34000);
-    const int32_t low_signal = soft_drive(10000, low_drive);
-    const int32_t high_signal = soft_drive(10000, high_drive);
+    Chain chain;
+    chain.Init(Params());
+    const auto out = Run(chain, std::vector<int32_t>(2 * 40000, 0));
+    CHECK(Peak(out, 30000) <= 2); // the saturation bias is removed by the DC blocker
 
-    if (low_signal <= 10200 || low_signal >= 11500)
-        return 11;
-    if (high_signal <= 18000)
-        return 12;
+    // Vinyl adds hiss/crackle, but it must stay quiet
+    Params p = Params();
+    p.vinyl = kParamMax;
+    chain.Init(p);
+    const auto vinyl = Run(chain, std::vector<int32_t>(2 * 44000, 0));
+    CHECK(Peak(vinyl, 0) > 0);
+    CHECK(Peak(vinyl, 0) < 12000);
     return 0;
 }
 
-int test_stereo_expander_widens_field()
+int TestTransparent()
 {
-    const int32_t narrow = stereo_field_expander(12000, -12000, 2000);
-    const int32_t wide = stereo_field_expander(12000, -12000, 12000);
-    if (!(wide > narrow))
-        return 13;
-    if (wide > 32767 || wide < -32768)
-        return 14;
+    // All stages neutral: output is the input delayed by kLatencySamples
+    Chain chain;
+    chain.Init(Neutral());
+    const auto input = Sine(30000, 1000.0, 0.5);
+    const auto out = Run(chain, input);
+    int32_t worst = 0;
+    for (size_t i = 20000; i < 30000; i++)
+    {
+        worst = std::max(worst, std::abs(out[2 * i] - input[2 * (i - Chain::kLatencySamples)]));
+    }
+    CHECK(worst < 100); // ~0.5%, mostly the 3 Hz DC blocker phase lead
     return 0;
 }
 
-int test_master_compress_is_bounded_and_tighter_at_high_amount()
+int TestMixDry()
 {
-    const int32_t low = master_compress(30000, 5000);
-    const int32_t high = master_compress(30000, 22000);
-    if (low < -32768 || low > 32767)
-        return 15;
-    if (high < -32768 || high > 32767)
-        return 16;
-    if (!(std::abs(high) <= std::abs(low)))
-        return 17;
+    Params p = Params();
+    p.mix = 0;
+    p.drive = kParamMax;
+    p.lofi = kParamMax;
+    p.output = 23170;
+    Chain chain;
+    chain.Init(p);
+    const auto input = Sine(6000, 700.0, 0.5);
+    const auto out = Run(chain, input);
+    int32_t worst = 0;
+    for (size_t i = 3000; i < 6000; i++)
+    {
+        worst = std::max(worst, std::abs(out[2 * i] - input[2 * (i - Chain::kLatencySamples)]));
+    }
+    CHECK(worst < 60);
     return 0;
 }
 
-int test_hiss_and_output_are_not_buzzing()
+int TestDriveMonotonic()
 {
-    if (!check_output_buzz_guard())
-        return 18;
+    // More drive never makes the saturated stage (before makeup/limiter) lose level at low-mid settings
+    int32_t previous = 0;
+    for (int32_t drive = 0; drive <= 20000; drive += 2000)
+    {
+        Params p = Neutral();
+        p.drive = drive;
+        Chain chain;
+        chain.Init(p);
+        const auto out = Run(chain, Sine(8000, 220.0, 0.1));
+        const int32_t peak = Peak(out, 2000);
+        CHECK(peak + 50 >= previous);
+        previous = peak;
+    }
+    CHECK(previous > 5000);
+
+    // Hard drive generates harmonics: output of a sine is no longer a sine (flat-topped)
+    Params p = Neutral();
+    p.drive = kParamMax;
+    Chain chain;
+    chain.Init(p);
+    const auto out = Run(chain, Sine(8000, 220.0, 0.9));
+    int32_t flat = 0;
+    const int32_t peak = Peak(out, 2000);
+    for (size_t i = 2000; i < 8000; i++)
+    {
+        flat += std::abs(out[2 * i]) > peak * 9 / 10;
+    }
+    CHECK(flat > 1200); // a pure sine spends ~29% of its time above 90% of peak, a clipped one much more
     return 0;
 }
+
+int TestCompression()
+{
+    // Dynamic range between a loud and quiet tone shrinks as the compressor amount rises
+    auto ratio_for = [](int32_t comp) {
+        Params p = Neutral();
+        p.comp = comp;
+        p.comp_speed = kParamMax;
+        Chain chain;
+        chain.Init(p);
+        const auto loud = Run(chain, Sine(20000, 300.0, 0.8));
+        const double loud_peak = Peak(loud, 10000);
+        chain.Init(p);
+        const auto quiet = Run(chain, Sine(20000, 300.0, 0.05));
+        const double quiet_peak = Peak(quiet, 10000);
+        return loud_peak / quiet_peak;
+    };
+    const double off = ratio_for(0);
+    const double mid = ratio_for(16000);
+    const double hard = ratio_for(kParamMax);
+    CHECK(off > 14.0 && off < 18.0);
+    CHECK(mid < off * 0.8);
+    CHECK(hard < mid);
+
+    // Gain reduction meter reports the reduction, attack is faster than release
+    Params p = Neutral();
+    p.comp = kParamMax;
+    Chain chain;
+    chain.Init(p);
+    Run(chain, Sine(8000, 300.0, 0.9));
+    CHECK(chain.GetCompGain() < 28000);
+    return 0;
 }
+
+int TestCompAttackRelease()
+{
+    // After a loud burst the gain recovers slowly with a slow setting and quickly with a fast one
+    auto recovery = [](int32_t speed) {
+        Params p = Neutral();
+        p.comp = kParamMax;
+        p.comp_speed = speed;
+        Chain chain;
+        chain.Init(p);
+        Run(chain, Sine(8000, 300.0, 0.9));
+        Run(chain, Sine(2200, 300.0, 0.01)); // 50 ms of quiet
+        return chain.GetCompGain();
+    };
+    CHECK(recovery(kParamMax) > recovery(0));
+    return 0;
+}
+
+int TestLofi()
+{
+    Params p = Neutral();
+    p.lofi = kParamMax;
+    Chain chain;
+    chain.Init(p);
+    const auto out = Run(chain, Sine(8000, 440.0, 0.5));
+    // Bit depth reduced to 8 bits: low byte is always 0
+    std::set<int32_t> levels;
+    size_t distinct = 0;
+    int32_t prev = 1 << 20;
+    int32_t longest_run = 0, run = 0;
+    for (size_t i = 3000; i < 8000; i++)
+    {
+        levels.insert(out[2 * i]);
+        if (out[2 * i] != prev)
+        {
+            distinct++;
+            run = 0;
+        }
+        else
+        {
+            longest_run = std::max(longest_run, ++run);
+        }
+        prev = out[2 * i];
+    }
+    CHECK(longest_run >= 5); // sample rate reduced (~1/8)
+    CHECK(levels.size() <= 260); // 8 bit
+
+    // Zero lofi is untouched
+    p.lofi = 0;
+    chain.Init(p);
+    const auto clean = Run(chain, Sine(8000, 440.0, 0.5));
+    std::set<int32_t> clean_levels;
+    for (size_t i = 3000; i < 8000; i++)
+    {
+        clean_levels.insert(clean[2 * i]);
+    }
+    CHECK(clean_levels.size() > 1000);
+    (void)distinct;
+    return 0;
+}
+
+// Measures spread of zero-crossing periods of a sine (wow = pitch instability)
+double CrossingSpread(const std::vector<int32_t> &buffer)
+{
+    std::vector<double> periods;
+    double last = -1.0;
+    for (size_t i = 2; i < buffer.size() / 2; i++)
+    {
+        if (buffer[2 * (i - 1)] < 0 && buffer[2 * i] >= 0)
+        {
+            const double t = i - static_cast<double>(buffer[2 * i]) / (buffer[2 * i] - buffer[2 * (i - 1)]);
+            if (last >= 0)
+            {
+                periods.push_back(t - last);
+            }
+            last = t;
+        }
+    }
+    double lo = 1e9, hi = -1e9;
+    for (double p : periods)
+    {
+        lo = std::min(lo, p);
+        hi = std::max(hi, p);
+    }
+    return periods.empty() ? 0.0 : hi - lo;
+}
+
+int TestWow()
+{
+    const auto input = Sine(88000, 880.0, 0.4);
+    Params p = Neutral();
+    Chain chain;
+    chain.Init(p);
+    const double steady = CrossingSpread(Run(chain, input));
+    p.wow = kParamMax;
+    chain.Init(p);
+    const double wobbly = CrossingSpread(Run(chain, input));
+    CHECK(steady < 0.2);
+    CHECK(wobbly > steady + 0.3);
+    CHECK(wobbly < 5.0); // musical, not seasick
+    return 0;
+}
+
+int TestVinyl()
+{
+    // HF rolloff: a 10 kHz tone loses level with vinyl up
+    Params p = Neutral();
+    Chain chain;
+    chain.Init(p);
+    const int32_t open = Peak(Run(chain, Sine(8000, 10000.0, 0.4)), 4000);
+    p.vinyl = kParamMax;
+    chain.Init(p);
+    const int32_t dull = Peak(Run(chain, Sine(8000, 10000.0, 0.4)), 4000);
+    CHECK(dull < open * 3 / 4);
+    return 0;
+}
+
+int TestWidth()
+{
+    // Mono signal is untouched by width, a one-sided signal collapses at width 0
+    Params p = Neutral();
+    p.width = 0;
+    Chain chain;
+    chain.Init(p);
+    const auto mono = Run(chain, Sine(4000, 500.0, 0.3));
+    for (size_t i = 2000; i < 4000; i++)
+    {
+        CHECK(std::abs(mono[2 * i] - mono[2 * i + 1]) <= 1);
+    }
+    chain.Init(p);
+    const auto left_only = Run(chain, Sine(4000, 500.0, 0.3, false));
+    for (size_t i = 2000; i < 4000; i++)
+    {
+        CHECK(std::abs(left_only[2 * i] - left_only[2 * i + 1]) <= 1);
+    }
+
+    // Wide: left-only gets a larger side component
+    p.width = kParamMax;
+    chain.Init(p);
+    const auto wide = Run(chain, Sine(4000, 500.0, 0.3, false));
+    CHECK(Peak(wide, 2000) > Peak(left_only, 2000));
+    return 0;
+}
+
+int TestLimiter()
+{
+    Params p = Neutral();
+    p.output = kParamMax;
+    p.drive = kParamMax;
+    Chain chain;
+    chain.Init(p);
+    const auto out = Run(chain, Sine(8000, 100.0, 1.0));
+    CHECK(Peak(out, 100) <= Chain::kLimiterCeiling + 800);
+    CHECK(chain.GetLimiterGain() < 32768);
+    return 0;
+}
+
+int TestBypass()
+{
+    Params p = Params();
+    p.drive = kParamMax;
+    p.lofi = kParamMax;
+    p.bypass = true;
+    Chain chain;
+    chain.Init(p);
+    const auto input = Sine(12000, 500.0, 0.5);
+    const auto out = Run(chain, input);
+    // Faded fully to the delayed dry signal after ~2048 samples, no clicks while fading
+    for (size_t i = 4000; i < 12000; i++)
+    {
+        CHECK(out[2 * i] == input[2 * (i - Chain::kLatencySamples)]);
+    }
+    CHECK(chain.GetBypassAmount() == 32768);
+
+    // The crossfade never jumps more than the two paths do by themselves
+    p.bypass = false;
+    chain.Init(p);
+    const auto processed = Run(chain, input);
+    auto max_jump = [](const std::vector<int32_t> &b) {
+        int32_t worst = 0;
+        for (size_t i = 1; i < b.size() / 2; i++)
+        {
+            worst = std::max(worst, std::abs(b[2 * i] - b[2 * (i - 1)]));
+        }
+        return worst;
+    };
+    CHECK(max_jump(out) <= std::max(max_jump(processed), max_jump(input)) + 500);
+    return 0;
+}
+
+int TestParamSweepNoClicks()
+{
+    // Sweeping a parameter block by block must not produce large sample jumps (zipper noise)
+    Params p = Neutral();
+    Chain chain;
+    chain.Init(p);
+    const auto input = Sine(48 * 400, 200.0, 0.3);
+    std::vector<int32_t> out(input.size());
+    for (size_t block = 0; block < 400; block++)
+    {
+        p.drive = static_cast<int32_t>(block * 80);
+        p.output = 12000 + static_cast<int32_t>(block * 40);
+        chain.SetParams(p);
+        chain.Process(input.data() + block * 96, out.data() + block * 96, 48);
+    }
+    int32_t worst = 0;
+    for (size_t i = 1; i < out.size() / 2; i++)
+    {
+        worst = std::max(worst, std::abs(out[2 * i] - out[2 * (i - 1)]));
+    }
+    CHECK(worst < 4000);
+    return 0;
+}
+
+int TestMaps()
+{
+    CHECK(PotToParam(0, 4095) == 0);
+    CHECK(PotToParam(4095, 4095) == kParamMax);
+    CHECK(PotToParam(5000, 4095) == kParamMax);
+    CHECK(PotToParam(-5, 4095) == 0);
+    int32_t previous = -1;
+    for (int32_t pot = 0; pot <= 4095; pot++)
+    {
+        const int32_t v = PotToParam(pot, 4095);
+        CHECK(v >= previous);
+        previous = v;
+    }
+
+    // Unpatched / 0 V CV leaves the knob alone at any position
+    for (int32_t param = 0; param <= kParamMax; param += 1000)
+    {
+        CHECK(ApplyCv(param, 0, 4095) == param);
+    }
+    CHECK(ApplyCv(0, 4095, 4095) == kParamMax);
+    CHECK(ApplyCv(10000, 2048, 4095) > 10000);
+    CHECK(ApplyCv(10000, -4095, 4095) == 0);
+    CHECK(ApplyCv(kParamMax, 4095, 4095) == kParamMax);
+    return 0;
+}
+
+int TestBypassToggle()
+{
+    BypassToggle toggle;
+    toggle.OnPress();
+    CHECK(toggle.OnRelease());
+    toggle.OnPress();
+    toggle.OnKnobMoved();
+    CHECK(!toggle.OnRelease());
+    toggle.OnPress();
+    CHECK(toggle.OnRelease());
+    return 0;
+}
+
+struct TestCase
+{
+    const char *name;
+    int (*fn)();
+};
+
+const TestCase kTests[] = {
+    {"bounds", TestBounds},
+    {"silence", TestSilence},
+    {"transparent", TestTransparent},
+    {"mix", TestMixDry},
+    {"drive", TestDriveMonotonic},
+    {"compression", TestCompression},
+    {"comp_timing", TestCompAttackRelease},
+    {"lofi", TestLofi},
+    {"wow", TestWow},
+    {"vinyl", TestVinyl},
+    {"width", TestWidth},
+    {"limiter", TestLimiter},
+    {"bypass", TestBypass},
+    {"sweep", TestParamSweepNoClicks},
+    {"maps", TestMaps},
+    {"bypass_toggle", TestBypassToggle},
+};
+} // namespace
 
 int main(int argc, char **argv)
 {
-    using TestFn = int (*)();
-    struct NamedTest
+    int failures = 0;
+    for (const TestCase &t : kTests)
     {
-        std::string_view name;
-        TestFn fn;
-    };
-
-    const NamedTest tests[] = {
-        {"drive", test_drive_monotonicity},
-        {"mix", test_mix_bounds_and_direction},
-        {"crush", test_bitcrush_reduction},
-        {"maps", test_pot_maps_are_valid},
-        {"stability", test_signal_path_stays_stable},
-        {"tuning", test_drive_tuning_is_subtle_then_drama},
-        {"stereo", test_stereo_expander_widens_field},
-        {"compression", test_master_compress_is_bounded_and_tighter_at_high_amount},
-        {"buzz", test_hiss_and_output_are_not_buzzing},
-    };
-
-    if (argc == 1)
-    {
-        for (const auto &test : tests)
+        if (argc > 1 && std::strcmp(argv[1], t.name) != 0)
         {
-            if (test.fn() != 0)
-            {
-                std::cerr << "FAIL: " << test.name << '\n';
-                return 1;
-            }
+            continue;
         }
-        return 0;
+        const int rc = t.fn();
+        std::printf("%-14s %s\n", t.name, rc == 0 ? "ok" : "FAILED");
+        failures += rc != 0;
     }
-
-    for (int i = 1; i < argc; ++i)
-    {
-        const std::string_view arg = argv[i];
-        bool found = false;
-        for (const auto &test : tests)
-        {
-            if (arg == test.name)
-            {
-                found = true;
-                if (test.fn() != 0)
-                {
-                    std::cerr << "FAIL: " << test.name << '\n';
-                    return 1;
-                }
-                break;
-            }
-        }
-        if (!found)
-        {
-            std::cerr << "Unknown test: " << arg << '\n';
-            return 2;
-        }
-    }
-
-    return 0;
+    return failures == 0 ? 0 : 1;
 }

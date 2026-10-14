@@ -1,211 +1,110 @@
 # MasterBlaster
 
-MasterBlaster is a Boum-inspired alternative firmware for the Bastl Kastle 2 and the Citadel.
-The goal is not to copy the OTO Machines Boum one-to-one, but to capture the same spirit: warm, saturated, gently broken, mastering-adjacent coloration with a lo-fi finish.
+A single, fixed **stereo mastering chain** for the Bastl Citadel (and Kastle 2): tape/vinyl-style saturation, tilt tone, glue bus compressor, vinyl character, lo-fi crunch, stereo width, dry/wet and a safety limiter.
+There are no modes. Every knob is always part of the same signal path (inspired by SP-404 vinyl sim, OTO Boum and SSL bus compression).
 
-This document acts as the current overview and operating guide for the firmware.
+App ID: `0x31`. Firmware: `kastle2-master-blaster.uf2`. Host DSP tests: `code/tests/master_blaster_tests.cpp`.
 
----
+## Signal flow
 
-## Quick concept
-
-The effect is intended to behave like a hybrid between:
-- an analog preamp / tape drive stage
-- a warm mastering chain
-- a gently corrupted lo-fi / sample-rate reducer
-- a lightly unstable wow/flutter section
-
-The signal path is:
-1. input trim / drive
-2. soft saturation
-3. warmth and low-mid glue
-4. compression-like gain fusion
-5. wow and flutter modulation
-6. bit reduction / lo-fi crunch
-7. wet/dry mix and output trim
-
----
-
-## Hardware map: Kastle 2 face
-
-This is the front panel layout for the Kastle 2 desktop version.
-
-```text
-                [ LED 1 ]   [ LED 2 ]   [ LED 3 ]
-
-                   MODE        SHIFT
-
-      +----------------------------------------------------------------+
-      |  K1  |  K2  |  K3  |  K4  |  K5  |  K6  |  K7  |              |
-      | DRIVE| TONE| GLUE| WOW | CRUSH| MIX | OUT |              |
-      +----------------------------------------------------------------+
-
-      ^                                                            ^
-      |                                                            |
-   left button                                                  right button
+```
+ IN L/R ─► INPUT GAIN ─► SATURATE ─► TONE ─► BUS COMP ─► VINYL ─► LO-FI ─► WIDTH ─► MIX ─► OUTPUT ─► LIMITER ─► OUT L/R
+          (Base,         K1         K2       K3 (+K2     K4 (+K4   K5       SHIFT   K6      K7         fixed       │
+           SHIFT+K1)     drive      tilt     SHIFT:      SHIFT:    bits &   +K6     │       trim         ceiling     │
+                                              speed)      wow)      rate     │      │                                │
+                                                                              └──────┴─ dry path (delayed 96 samples to match wow stage)
+ BYPASS (MODE short press): click-free crossfade to the latency-matched dry signal
 ```
 
-Notes:
-- The seven pots are the main performance controls.
-- The two buttons are the primary UI controls: `SHIFT` and `MODE`.
-- The three LEDs are used to show the active effect mode and state.
+| Stage | What it does |
+|---|---|
+| Saturate | 1x–8x input drive into a soft cubic shaper (reaches full saturation at mid knob), slight asymmetry for even harmonics, level compensation, DC blocker |
+| Tone | Tilt EQ pivoting at about 700 Hz. Centre = flat, left = darker, right = brighter |
+| Bus comp | Stereo-linked peak detector, fixed 4:1 ratio, knob lowers the threshold, automatic makeup gain, attack/release scaled by the speed control |
+| Vinyl | Wow/flutter/drift pitch wobble (modulated delay), high-frequency rolloff, hiss and crackle |
+| Lo-fi | Sample-rate reduction (down to about 1/8) and bit reduction (down to 8 bit) |
+| Width | Mid/side. 0 = mono, centre = unchanged, max = 2x side |
+| Mix | Parallel dry/wet. The dry path is delay-matched so it never phases against the wet path |
+| Output | Output trim (unity at about 70%), then a peak limiter at about -0.5 dBFS |
 
----
+## Knob map
 
-## Hardware map: Citadel face
+All parameters are available from the three pot layers. Pots keep their last value when you switch layer; a pot only takes over again after you move it.
 
-The Citadel uses the same logical control order as the Kastle 2, with its larger eurorack-facing layout and CV patch arrangement. The primary knob positions remain the same, and the firmware uses the same logic across both hardware variants.
+```
+ NORMAL layer (no button)
+ ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+ │  K1    │  K2    │  K3    │  K4    │  K5    │  K6    │  K7    │
+ │ DRIVE  │ TONE   │ COMP   │ VINYL  │ LO-FI  │ MIX    │ OUTPUT │
+ │ 1x-8x  │ dark → │ none → │ clean →│ clean →│ dry →  │ trim   │
+ │ sat    │ bright │ squash │ worn   │ crushed│ wet    │        │
+ └────────┴────────┴────────┴────────┴────────┴────────┴────────┘
 
-```text
-        [ LED 1 ]      [ LED 2 ]      [ LED 3 ]
+ SHIFT held
+ ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+ │  K1    │  K2    │  K3    │  K4    │  K5    │  K6    │  K7    │
+ │ (Base) │ COMP   │ (Base) │ WOW    │ (Base) │ WIDTH  │ (Base) │
+ │ input  │ SPEED  │        │ pitch  │ output │ mono → │        │
+ │ gain   │ slow → │        │ wobble │ gain   │ wide   │        │
+ │        │ fast   │        │        │        │        │        │
+ └────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+   K1/K3/K5/K7 on SHIFT belong to the base platform (input gain, rhythm, output gain, tempo) and are not used here.
 
-                MODE                     SHIFT
-
-      +----------------------------------------------------------------+
-      |  K1  |  K2  |  K3  |  K4  |  K5  |  K6  |  K7  |              |
-      | DRIVE| TONE| GLUE| WOW | CRUSH| MIX | OUT |              |
-      +----------------------------------------------------------------+
-
-      [ CV IN ]   [ GATE ]   [ SYNC ]    [ PATCH BAY / JACKS ]
+ MODE held: pots belong to the base platform (settings). Moving one of them cancels the bypass toggle on release.
+ MODE tap : bypass on/off
 ```
 
-Key point:
-- The front-panel knob order is functionally the same as Kastle 2.
-- The Citadel differences are mainly around signal routing and ADC scaling, not the MasterBlaster control philosophy.
+### Jacks (Citadel)
 
----
+CV inputs are bipolar and **additive**: 0 V (or nothing patched) leaves the knob untouched, +5 V adds a full knob range, negative voltage subtracts. Results are clamped.
 
-## MasterBlaster knob map
+| Jack | Controls |
+|---|---|
+| PARAM 1 CV | Drive |
+| PARAM 2 CV | Comp amount |
+| PARAM 3 CV | Lo-fi |
+| Audio in L/R | Stereo input (a mono cable on L is fine, enable mono mode in the base settings if needed) |
+| Audio out L/R | Stereo output |
 
-The current firmware uses the following assignment from left to right on the face:
+> The CV roles use the base platform's PARAM 1–3 inputs. Check your module's panel labelling for the matching jacks.
 
-| Knob | Function | Purpose |
-|---|---|---|
-| K1 | Drive | Input saturation intensity |
-| K2 | Warmth / Tone | Low-mid richness and analog color |
-| K3 | Glue | Compression / gain fusion |
-| K4 | Wow / Flutter | Instability and tape-like wobble |
-| K5 | Crush | Bit-depth and lo-fi reduction |
-| K6 | Mix | Wet/dry blend |
-| K7 | Output | Final level trim |
+### LEDs
 
-This is the effective mapping used by the current MasterBlaster app implementation.
+| LED | Shows |
+|---|---|
+| LED 1 | Input level (base platform) |
+| LED 2 | Compressor gain reduction (brighter = more reduction) |
+| LED 3 | Limiter activity (red) over mix level, grey when bypassed (LED 2 also grey) |
 
----
+## Quick recipes
 
-## Buttons and modes
+| Goal | Settings |
+|---|---|
+| Transparent glue | Drive 20%, Tone centre, Comp 30%, SHIFT Comp speed 60%, rest 0, Mix 100% |
+| SSL-style squeeze | Drive 30%, Comp 60-70%, speed fast, Mix 60% for parallel compression |
+| SP-404 vinyl sim | Drive 40%, Tone slightly dark, Vinyl 50%, Wow 30%, Lo-fi 15% |
+| OTO Boum style crush | Drive 70%, Comp 80%, Lo-fi 50%, Output down to compensate, Mix 70% |
+| Mono-safe low end | SHIFT Width down to 0 |
 
-### MODE button
-Cycles the active effect profile:
-- WARM
-- MASTER
-- CRUSH
-- BYPASS
+## Notes and limits
 
-### SHIFT button
-Shift changes the active control layer. On Kastle 2/Citadel this is a secondary control layer, used for alternate values or settings depending on the firmware.
+- Fixed latency: 96 samples (about 2.2 ms), the dry and bypass paths are matched.
+- Integer DSP only (the RP2040 has no FPU). Stereo processing runs well within the audio budget; exact load has not been measured on hardware.
+- Settings are **not** saved across power cycles yet; the module starts with the defaults (mild drive, flat tone, mix 100%, output about unity).
+- Knob ranges and time constants were tuned by calculation and host simulation. Expect to fine tune by ear on hardware.
 
-In MasterBlaster the current implementation is primarily using the normal knob layer, but the base hardware architecture supports Shift + knob access should we want to expose secondary controls later.
+## Development
 
----
+```
+cmake -S code/tests -B /tmp/mbt && cmake --build /tmp/mbt && ctest --test-dir /tmp/mbt
+```
 
-## LED behavior
+The tests compile the real `MasterBlasterDsp.cpp` and check bounds (fuzzed parameters), silence, transparency at neutral settings, saturation, compression, lo-fi quantisation, wow, vinyl filtering, width, limiter, click-free bypass, parameter sweeps and the CV/pot mappings.
 
-The LEDs are used as a visual status indicator for the active mode:
-- warm mode = amber / golden
-- master mode = cool blue / bright modern mastering tone
-- crush mode = magenta / hot lo-fi color
-- bypass mode = neutral gray
+### Browser emulator
 
----
+`emulator/` is a web test bench that runs the real MasterBlaster firmware (Base + app) as WebAssembly behind a Citadel-layout virtual panel. Load a WAV/AIFF/MP3, play it through the chain in real time, render and export it, run the firmware bench suite, see an ARM cycle estimate, and flash the `.uf2` to a Citadel from the page. See [emulator/README.md](emulator/README.md).
 
-## Shift + knob behavior on Kastle 2 / Citadel
-
-This is the core hardware concept shared by both devices:
-
-- normal knob operation = main app parameters
-- Shift + knob = alternate control layer
-- the same physical knob reads a different layer value when Shift is held
-- this is how the platform exposes hidden controls, settings, or secondary functions without changing the physical layout
-
-So in practical terms:
-- the knob itself does not magically change function by code alone
-- the firmware changes which "pot layer" is being read when Shift is active
-
-This is the underlying system behavior used by the stock base firmware and is available to MasterBlaster later if we want extended hidden controls.
-
----
-
-## Firmware summary
-
-MasterBlaster is designed as a single-app effect intended to feel like a warm, imperfect, mastering-style processor with the following character:
-- more saturation than clean dynamics processing
-- subtle tape wow and instability
-- compressed glue stage
-- low-bit, low-sample-rate degradation
-- gentle final drive and output trim
-
-It is meant to feel like a lo-fi / warm / broken master bus tool rather than a pristine plugin-style effect.
-
----
-
-## Built-in panel I/O mapping
-
-The Kastle 2 / Citadel have a few built-in panel inputs and outputs that are useful for MasterBlaster beyond the main seven pots.
-
-### Current practical mapping in the firmware
-
-- PARAM_1: drive CV / saturation amount modulation
-- PARAM_2: glue CV / compression / warmth modulation
-- PARAM_3: crush CV / bit-depth modulation
-
-This is already used by the app in the UI loop as an external modulation path. The app reads those ADC inputs and adds their influence to the mapped drive, glue, and crush parameters.
-
-### Planned / recommended extra mapping
-
-- PITCH_1: external wow / flutter modulation or a secondary drive bias
-- PITCH_2: optional tape-speed / instability modulation
-- MODE: effect mode selection / bank switching when used as a digital control input
-- FEED_1 / FEED_2 / FEED_3: external signal sources for modulation, sidechain style control, or future cross-patching
-- ENV_OUT: envelope-like output of the processed signal or internal drive contour
-- CV_OUT: processed control voltage derived from the drive/glue/crush state
-- TRI_OUT: slow modulation reference or LFO-like modulation source for external modules
-
-### How the controls line up conceptually
-
-The physical knobs remain the primary performer controls:
-- K1 Drive: input drive and break-up depth
-- K2 Warmth: tone and low-mid saturation color
-- K3 Glue: compression and density
-- K4 Wow: tape wobble and instability
-- K5 Crush: bit reduction and sample-rate collapse
-- K6 Mix: dry / wet blend
-- K7 Output: final level trim
-
-The panel CV inputs are not a second parameter set yet; they act as modulation sources that bias the same core controls.
-
-That means the effect stays simple and musical: the knobs set the main tone, and the CV inputs can nudge drive, glue, and crunch without completely replacing the front panel workflow.
-
----
-
-## Current implementation status
-
-This project has reached the point where the app is integrated into the firmware tree and compiles as a standalone firmware target. The current implementation is intentionally a first-pass prototype of the effect architecture, with the following goals still in progress:
-
-- refine tonal shaping and drive response
-- tune wow / flutter to feel more analog and less synthetic
-- polish parameter ranges for a more convincing Boum-like character
-- add stronger hardware validation through end-to-end testing
-
-The current tuning target is deliberately intentionally subtle near minimum and much more dramatic near maximum, so it behaves like a warm and musical effect at low settings and becomes unmistakably broken / saturated at the top end.
-
----
-
-## Development note
-
-When adding new controls or new modes, keep the panel mapping consistent with this document so the physical hardware and the firmware remain aligned.
-
-The intended flow is:
-- map the physical knob positions first
-- define the effect function in software
-- validate it with tests before writing to hardware
+```
+cd emulator && npm install && npm run dev
+```
