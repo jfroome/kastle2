@@ -1,4 +1,0 @@
-/Users/jfroome/projects/kastle2/build-tests/CMakeFiles/master_blaster_tests.dir
-/Users/jfroome/projects/kastle2/build-tests/CMakeFiles/test.dir
-/Users/jfroome/projects/kastle2/build-tests/CMakeFiles/edit_cache.dir
-/Users/jfroome/projects/kastle2/build-tests/CMakeFiles/rebuild_cache.dir
