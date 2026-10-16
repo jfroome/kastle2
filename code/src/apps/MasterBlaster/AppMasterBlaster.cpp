@@ -28,6 +28,11 @@ SOFTWARE.
 
 using namespace kastle2;
 
+namespace
+{
+constexpr uint32_t kBootSnapMs = 600; // Pots settle during start-up, no need to fade that
+}
+
 void AppMasterBlaster::Init()
 {
     inited_ = false;
@@ -37,6 +42,12 @@ void AppMasterBlaster::Init()
     Kastle2::base.SetFeatureEnabled(Base::Feature::AUDIO_CHAIN, false);
     // Base would otherwise let the LFO modulate input/output gain
     Kastle2::base.SetFeatureEnabled(Base::Feature::LFO_MOD_MAPPING, false);
+
+    first_ui_ms_ = 0;
+    for (auto &glide : glides_)
+    {
+        glide = masterblaster::KnobGlide();
+    }
 
     inited_ = true;
 }
@@ -70,6 +81,25 @@ bool AppMasterBlaster::ReadParam(int32_t &param, Hardware::Pot pot, Hardware::La
     return true;
 }
 
+masterblaster::SwitchPosition AppMasterBlaster::ReadSwitch(Hardware::AnalogInput feed,
+                                                           masterblaster::SwitchDebouncer &debouncer)
+{
+    using Position = masterblaster::SwitchPosition;
+    Position reading = Position::MIDDLE;
+    switch (Kastle2::hw.GetFeedValue(feed))
+    {
+    case Hardware::FeedValue::HIGH:
+        reading = Position::UP;
+        break;
+    case Hardware::FeedValue::LOW:
+        reading = Position::DOWN;
+        break;
+    default:
+        break;
+    }
+    return debouncer.Update(reading, to_ms_since_boot(get_absolute_time()));
+}
+
 void AppMasterBlaster::UiLoop()
 {
     using Layer = Hardware::Layer;
@@ -89,6 +119,10 @@ void AppMasterBlaster::UiLoop()
     ReadParam(knobs_.wow, Pot::POT_4, Layer::SHIFT);
     ReadParam(knobs_.width, Pot::POT_6, Layer::SHIFT);
 
+    // The two 3-pole switches (silkscreened INV CV / INV GATE) choose the vinyl noise and the wow speed
+    knobs_.noise_type = masterblaster::NoiseTypeFromSwitch(ReadSwitch(Hardware::AnalogInput::FEED_3, noise_switch_));
+    knobs_.wow_speed = masterblaster::WowSpeedFromSwitch(ReadSwitch(Hardware::AnalogInput::FEED_1, wow_switch_));
+
     // MODE button toggles bypass unless it was used to reach a MODE layer knob
     if (Kastle2::hw.JustPressed(Hardware::Button::MODE))
     {
@@ -107,15 +141,32 @@ void AppMasterBlaster::UiLoop()
         knobs_.bypass = !knobs_.bypass;
     }
 
+    // Knob jumps glide instead of snapping. This is done on the knob values only, before CV is added, so CV
+    // modulation is not slowed down. The first moments after boot snap to the pot positions.
+    const uint32_t now = to_ms_since_boot(get_absolute_time());
+    if (first_ui_ms_ == 0)
+    {
+        first_ui_ms_ = now == 0 ? 1 : now;
+    }
+    const bool glide = now - first_ui_ms_ > kBootSnapMs;
+    masterblaster::Params smoothed = knobs_;
+    int32_t *const parameters[] = {&smoothed.drive, &smoothed.tone,  &smoothed.comp, &smoothed.comp_speed,
+                                   &smoothed.vinyl, &smoothed.wow,   &smoothed.lofi, &smoothed.width,
+                                   &smoothed.mix,   &smoothed.output};
+    for (size_t i = 0; i < 10; i++)
+    {
+        *parameters[i] = glides_[i].Update(*parameters[i], now, glide);
+    }
+
     // CV: 0 V (or unpatched) leaves the knob untouched
     const int32_t adc_5v = ADC_5V;
-    masterblaster::Params effective = knobs_;
+    masterblaster::Params effective = smoothed;
     effective.drive = masterblaster::ApplyCv(
-        knobs_.drive, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_1), adc_5v);
+        smoothed.drive, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_1), adc_5v);
     effective.comp = masterblaster::ApplyCv(
-        knobs_.comp, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_2), adc_5v);
+        smoothed.comp, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_2), adc_5v);
     effective.lofi = masterblaster::ApplyCv(
-        knobs_.lofi, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_3), adc_5v);
+        smoothed.lofi, Kastle2::hw.GetAnalogValue(Hardware::AnalogInput::PARAM_3), adc_5v);
     chain_.SetParams(effective);
 
     // LED 1 is the input level meter from Base. LED 2: compressor gain reduction. LED 3: limiter / bypass.

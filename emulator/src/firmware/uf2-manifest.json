@@ -1,7 +1,18 @@
 {
-  "file": "kastle2-master-blaster.uf2",
-  "bytes": 540160,
-  "sha256": "b310bc81926bf89cbb7b351725543fb9849820f4272de100d83223cec1ce3e5a",
-  "builtAt": "2026-10-14T15:11:51.901Z",
-  "sourceHash": "1625b00c5337"
+  "apps": {
+    "masterblaster": {
+      "file": "kastle2-master-blaster.uf2",
+      "bytes": 543744,
+      "sha256": "12c97fdd53155c344157c4103eacf0516c39de03e6f65577d1ab43b52726010e",
+      "builtAt": "2026-10-14T18:03:50.559Z",
+      "sourceHash": "6bbc1470231c"
+    },
+    "beads": {
+      "file": "kastle2-beads.uf2",
+      "bytes": 571904,
+      "sha256": "73a20026eb6c7177c8c4d1267707f09c42b0528019ed86cbaa1d517115ae2870",
+      "builtAt": "2026-10-14T16:20:08.883Z",
+      "sourceHash": "fd145f664738"
+    }
+  }
 }

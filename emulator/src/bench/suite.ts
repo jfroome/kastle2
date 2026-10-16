@@ -115,6 +115,7 @@ function pitchWobble(signal: Float32Array): number {
 }
 
 const isMasterBlaster = (env: BenchEnv) => env.app.id === "masterblaster";
+const isBeads = (env: BenchEnv) => env.app.id === "beads";
 
 async function runBlocks(board: FirmwareBoard, blocks: number): Promise<void> {
   const z = new Float32Array(BLOCK_SIZE);
@@ -286,6 +287,101 @@ export const BENCH_TESTS: BenchTest[] = [
     },
   },
   {
+    id: "fw-beads-density",
+    name: "Beads: density centre makes no grains, either side does",
+    description: "Wet-only output on steady noise. Free-running grains are silent in the middle of the density knob (the seed-only zone).",
+    appliesTo: isBeads,
+    async run(env) {
+      const input = pinkNoise(8, -18);
+      const wet = { ...controlDefaults(env.app), dry_wet: PARAM_MAX, reverb: 0, feedback: 0, time: 6000, size: 24000 };
+      const level = async (density: number) => {
+        const board = await env.newBoard({ ...wet, density });
+        const out = await renderFirmware(board, input, { warmupSec: 3, sampleRate: 44000 });
+        return rmsDb(slice(out, 3, 8));
+      };
+      const regular = await level(9000);
+      const centre = await level(16384);
+      const random = await level(24000);
+      return {
+        pass: regular > centre + 20 && random > centre + 20,
+        detail: `regular ${fmt(regular)} dB, centre ${fmt(centre)} dB, random ${fmt(random)} dB`,
+      };
+    },
+  },
+  {
+    id: "fw-beads-freeze",
+    name: "Beads: a MODE tap freezes the buffer",
+    description: "Noise is recorded, then the input stops. Without freeze the cloud dies out with the buffer; after a MODE tap (the firmware's own button logic) it keeps playing.",
+    appliesTo: isBeads,
+    async run(env) {
+      const noise = pinkNoise(3, -12);
+      const silent = silence(7);
+      const input = { name: "x", sampleRate: noise.sampleRate, left: new Float32Array([...noise.left, ...silent.left]), right: new Float32Array([...noise.right, ...silent.right]) };
+      const knobs = { ...controlDefaults(env.app), dry_wet: PARAM_MAX, reverb: 0, feedback: 0, time: 14000, size: 24000, density: 9000, shape: 8000 };
+      const run = async (tap: boolean) => {
+        const board = await env.newBoard(knobs);
+        let tapped = false;
+        const out = await renderFirmware(board, input, {
+          warmupSec: 3,
+          sampleRate: 44000,
+          beforeBlock: (t, b) => {
+            if (tap && t >= 2.9 && !tapped) {
+              tapped = true;
+              b.queue([{ type: "button", button: "MODE", down: true }, { type: "wait", blocks: 15 }, { type: "button", button: "MODE", down: false }]);
+            }
+          },
+        });
+        return { late: rmsDb(slice(out, 7, 10)), led: board.state().leds[1] };
+      };
+      const free = await run(false);
+      const frozen = await run(true);
+      return {
+        pass: frozen.late > free.late + 20 && frozen.led[2] > 100,
+        detail: `late output ${fmt(free.late)} dB unfrozen vs ${fmt(frozen.late)} dB after the tap; LED 2 ${frozen.led.join(",")}`,
+      };
+    },
+  },
+  {
+    id: "fw-beads-seed",
+    name: "Beads: seeded mode only grains on TRIG",
+    description: "MODE+K4 to the right makes grains wait for the seed gate; pulses on the TRIG jack then trigger them.",
+    appliesTo: isBeads,
+    async run(env) {
+      const input = pinkNoise(8, -18);
+      const knobs = { ...controlDefaults(env.app), dry_wet: PARAM_MAX, reverb: 0, feedback: 0, time: 6000, size: 24000, density: 9000, seed: PARAM_MAX };
+      const run = async (pulses: boolean) => {
+        const board = await env.newBoard(knobs);
+        const out = await renderFirmware(board, input, {
+          warmupSec: 3,
+          sampleRate: 44000,
+          beforeBlock: (t, b) => {
+            b.panel.trig = pulses && t % 0.5 < 0.04;
+          },
+        });
+        return rmsDb(slice(out, 2, 8));
+      };
+      const quiet = await run(false);
+      const seeded = await run(true);
+      return { pass: seeded > quiet + 15, detail: `no seed ${fmt(quiet)} dB, TRIG pulses ${fmt(seeded)} dB` };
+    },
+  },
+  {
+    id: "fw-beads-feedback",
+    name: "Beads: maximum feedback stays bounded",
+    description: "SHIFT+K6 at maximum with dense grains and loud noise through the real firmware: finite, under the limiter ceiling, and it settles when the input stops.",
+    appliesTo: isBeads,
+    async run(env) {
+      const noise = pinkNoise(5, -6);
+      const quiet = silence(4);
+      const input = { name: "x", sampleRate: noise.sampleRate, left: new Float32Array([...noise.left, ...quiet.left]), right: new Float32Array([...noise.right, ...quiet.right]) };
+      const knobs = { ...controlDefaults(env.app), feedback: PARAM_MAX, density: 4000, size: 28000, dry_wet: 30000, reverb: 20000 };
+      const board = await env.newBoard(knobs);
+      const out = await renderFirmware(board, input, { warmupSec: 3, sampleRate: 44000 });
+      const stats = analyze(out);
+      return { pass: Number.isFinite(stats.rmsDb) && stats.peakDb < -0.3, detail: `peak ${fmt(stats.peakDb)} dBFS, RMS ${fmt(stats.rmsDb)} dBFS` };
+    },
+  },
+  {
     id: "fw-cv-front-end",
     name: "CV jacks: 0 V neutral, ±5 V full scale",
     description: "The firmware's own calibration of the PARAM inputs (inverting Citadel input stage) reads 0 V as 0 and ±5 V as ±4095 ADC units.",
@@ -306,6 +402,32 @@ export const BENCH_TESTS: BenchTest[] = [
         pass: Math.abs(unpatched) < 40 && Math.abs(zero) < 40 && Math.abs(up - 4095) < 60 && Math.abs(down + 4095) < 120,
         detail: `unpatched ${unpatched}, 0 V → ${zero}, +5 V → ${up}, -5 V → ${down} (ADC units, 819 per volt)`,
       };
+    },
+  },
+  {
+    id: "fw-pitch-jacks",
+    name: "PITCH jacks read steadily (not behind the multiplexer)",
+    description: "The pitch inputs go straight to ADC2/ADC3, so a held voltage must read the same on every block. Regression guard for the HAL multiplexer model.",
+    appliesTo: (env) => env.app.jacks.some((j) => j.input === "PITCH_1" || j.input === "PITCH_2"),
+    async run(env) {
+      const board = await env.newBoard();
+      await settle(board);
+      const z = new Float32Array(BLOCK_SIZE);
+      const o = new Float32Array(BLOCK_SIZE);
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const jack of ["PITCH_1", "PITCH_2"] as const) {
+        board.setVolts(jack, 1);
+        await runBlocks(board, 30);
+        for (let i = 0; i < 40; i++) {
+          board.runBlock(z, z, 0, o, o, 0);
+          const v = board.pitchAdc(jack);
+          lo = Math.min(lo, v);
+          hi = Math.max(hi, v);
+        }
+        board.setVolts(jack, undefined);
+      }
+      return { pass: hi - lo < 40 && Math.abs(lo - 819) < 60, detail: `1 V reads ${lo}–${hi} ADC units over 80 blocks (ideal 819)` };
     },
   },
   {
@@ -366,6 +488,141 @@ export const BENCH_TESTS: BenchTest[] = [
       return {
         pass: Math.abs(bypassed) < 1 && processed > 3 && led[0] === 40 && led[1] === 40,
         detail: `processed ${processed >= 0 ? "+" : ""}${fmt(processed)} dB, bypassed ${bypassed >= 0 ? "+" : ""}${fmt(bypassed)} dB vs input; LED 2 ${led.join(",")}`,
+      };
+    },
+  },
+  {
+    id: "fw-mb-noise-switch",
+    name: "Left switch picks the vinyl noise: low-pitched / high-pitched / off",
+    description: "Silence in, Vinyl at maximum, through the real firmware. The CV switch (FEED 3) up gives dark rumbly noise, the middle gives bright hiss, down gives exactly nothing.",
+    appliesTo: isMasterBlaster,
+    async run(env) {
+      const knobs = { ...controlDefaults(env.app), drive: 0, comp: 0, vinyl: 20000, mix: PARAM_MAX };
+      const measure = async (volts: number | undefined, vinyl = 20000) => {
+        const board = await env.newBoard({ ...knobs, vinyl });
+        const out = await renderFirmware(board, silence(3), {
+          warmupSec: 3,
+          sampleRate: 44000,
+          beforeBlock: (_t, b) => b.setVolts("FEED_3", volts),
+        });
+        // Only the AC part counts: the output stage leaves a constant offset of a few LSB
+        const x = out.left.slice(44000);
+        const mean = x.reduce((a, b) => a + b, 0) / x.length;
+        let sum = 0;
+        let diff = 0;
+        for (let i = 1; i < x.length; i++) {
+          sum += (x[i] - mean) ** 2;
+          diff += (x[i] - x[i - 1]) ** 2;
+        }
+        const rms = Math.sqrt(sum / x.length);
+        return { rms, db: 20 * Math.log10(rms + 1e-9), brightness: rms > 0 ? Math.sqrt(diff / x.length) / rms : 0 };
+      };
+      const low = await measure(5);
+      const high = await measure(undefined);
+      const off = await measure(0, PARAM_MAX);
+      const pass = off.rms === 0 && low.db > -80 && high.db > -80 && high.brightness > 3 * low.brightness && Math.abs(low.db - high.db) < 8;
+      return {
+        pass,
+        detail: `up ${fmt(low.db)} dB, brightness ${fmt(low.brightness, 2)} · middle ${fmt(high.db)} dB, brightness ${fmt(high.brightness, 2)} · down ${off.rms === 0 ? "silent" : fmt(off.db) + " dB"}`,
+      };
+    },
+  },
+  {
+    id: "fw-mb-wow-speed",
+    name: "Right switch sets the wow speed: slow / medium / fast",
+    description: "A steady 880 Hz tone with Wow at maximum through the real firmware. The pitch wobble's dominant rate must follow the GATE switch (FEED 1): up ≈ 0.24 Hz, middle ≈ 0.6 Hz, down ≈ 1.3 Hz.",
+    appliesTo: isMasterBlaster,
+    async run(env) {
+      const knobs = { ...controlDefaults(env.app), drive: 0, comp: 0, vinyl: 0, wow: PARAM_MAX, mix: PARAM_MAX };
+      const dominantHz = async (volts: number | undefined) => {
+        const board = await env.newBoard(knobs);
+        const input = sine(880, 16, -12);
+        const out = await renderFirmware(board, input, {
+          warmupSec: 3,
+          sampleRate: 44000,
+          beforeBlock: (_t, b) => b.setVolts("FEED_1", volts),
+        });
+        const x = out.left;
+        const times: number[] = [];
+        const periods: number[] = [];
+        let last = -1;
+        for (let i = 44000; i < x.length; i++) {
+          if (x[i - 1] < 0 && x[i] >= 0) {
+            const t = i - 1 + -x[i - 1] / (x[i] - x[i - 1]);
+            if (last >= 0) {
+              times.push(t);
+              periods.push(t - last);
+            }
+            last = t;
+          }
+        }
+        const mean = periods.reduce((a, b) => a + b, 0) / periods.length;
+        let best = 0;
+        let bestHz = 0;
+        for (let hz = 0.1; hz < 2.0; hz += 0.02) {
+          let c = 0;
+          let s = 0;
+          for (let i = 0; i < periods.length; i++) {
+            const phase = (2 * Math.PI * hz * times[i]) / 44000;
+            c += (periods[i] - mean) * Math.cos(phase);
+            s += (periods[i] - mean) * Math.sin(phase);
+          }
+          const m = Math.hypot(c, s);
+          if (m > best) {
+            best = m;
+            bestHz = hz;
+          }
+        }
+        return bestHz;
+      };
+      const slow = await dominantHz(5);
+      const medium = await dominantHz(undefined);
+      const fast = await dominantHz(0);
+      const pass = Math.abs(slow - 0.24) < 0.1 && Math.abs(medium - 0.6) < 0.1 && Math.abs(fast - 1.32) < 0.2;
+      return { pass, detail: `up ${fmt(slow, 2)} Hz · middle ${fmt(medium, 2)} Hz · down ${fmt(fast, 2)} Hz` };
+    },
+  },
+  {
+    id: "fw-mb-knob-glide",
+    name: "Knob jumps glide instead of snapping",
+    description: "The Output knob is jumped from 70 % to 30 % while a tone plays. The level must fall over roughly a quarter of a second (10 % to 90 % of the move takes 80-300 ms) instead of in one step, and a slow turn must not lag.",
+    appliesTo: isMasterBlaster,
+    async run(env) {
+      const knobs = { ...controlDefaults(env.app), drive: 0, comp: 0, vinyl: 0, wow: 0, lofi: 0, mix: PARAM_MAX };
+      const outPot = env.app.controls.find((c) => c.key === "output")!.pot;
+      const envelope = (x: Float32Array, window: number) => {
+        const out: number[] = [];
+        for (let i = 0; i + window <= x.length; i += window) {
+          let peak = 0;
+          for (let j = i; j < i + window; j++) peak = Math.max(peak, Math.abs(x[j]));
+          out.push(peak);
+        }
+        return out;
+      };
+      const board = await env.newBoard({ ...knobs, output: 23170 });
+      const jumpAt = 1.5;
+      const out = await renderFirmware(board, sine(1000, 4, -12), {
+        warmupSec: 3,
+        sampleRate: 44000,
+        beforeBlock: (t, b) => b.setPot(outPot, t < jumpAt ? 23170 / PARAM_MAX : 10000 / PARAM_MAX),
+      });
+      const window = 220; // 5 ms
+      const env5 = envelope(out.left, window);
+      const before = env5[Math.floor((jumpAt * 44000) / window) - 20];
+      const after = env5[env5.length - 20];
+      const t10 = before - 0.1 * (before - after);
+      const t90 = before - 0.9 * (before - after);
+      const start = Math.floor((jumpAt * 44000) / window) - 5;
+      let i10 = -1;
+      let i90 = -1;
+      for (let i = start; i < env5.length; i++) {
+        if (i10 < 0 && env5[i] < t10) i10 = i;
+        if (i90 < 0 && env5[i] < t90) i90 = i;
+      }
+      const rampMs = ((i90 - i10) * window * 1000) / 44000;
+      return {
+        pass: i10 >= 0 && i90 >= 0 && after < before * 0.5 && rampMs >= 80 && rampMs <= 300,
+        detail: `level ${fmt(20 * Math.log10(before))} → ${fmt(20 * Math.log10(after))} dBFS, 10-90 % of the move took ${fmt(rampMs, 0)} ms`,
       };
     },
   },

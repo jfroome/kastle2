@@ -56,11 +56,17 @@ public:
 
 private:
     bool ReadParam(int32_t &param, Hardware::Pot pot, Hardware::Layer layer);
+    /// Position of one of the two front-panel 3-pole switches (they sit on the tri-state FEED inputs)
+    masterblaster::SwitchPosition ReadSwitch(Hardware::AnalogInput feed, masterblaster::SwitchDebouncer &debouncer);
 
     bool inited_ = false;
     masterblaster::Chain chain_;
     masterblaster::Params knobs_; // Knob positions, CV is added on top
     masterblaster::BypassToggle bypass_toggle_;
+    masterblaster::KnobGlide glides_[10]; // One per knob parameter, see UiLoop
+    uint32_t first_ui_ms_ = 0;
+    masterblaster::SwitchDebouncer noise_switch_; // Left switch (CV, FEED 3)
+    masterblaster::SwitchDebouncer wow_switch_;   // Right switch (GATE, FEED 1)
 };
 
 }

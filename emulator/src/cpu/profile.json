@@ -11,9 +11,9 @@
           "name": "defaults",
           "description": "All knobs at 50 %, demo-style stereo noise input",
           "core0_audio": {
-            "mean": 51877.71,
-            "p99": 52065,
-            "max": 52646
+            "mean": 50328.58,
+            "p99": 50563,
+            "max": 51149
           },
           "core1_audio": {
             "mean": 0.0,
@@ -21,9 +21,9 @@
             "max": 0
           },
           "ui_loop_iteration": {
-            "mean": 13875.740833333333,
-            "p99": 13905.75,
-            "max": 13908.25
+            "mean": 15632.420833333334,
+            "p99": 15681.0,
+            "max": 15694.75
           },
           "blocks": 300
         },
@@ -31,9 +31,9 @@
           "name": "all knobs max",
           "description": "All seven knobs at 100 %",
           "core0_audio": {
-            "mean": 51879.70333333333,
-            "p99": 52065,
-            "max": 52648
+            "mean": 50330.02333333333,
+            "p99": 50563,
+            "max": 51151
           },
           "core1_audio": {
             "mean": 0.0,
@@ -41,9 +41,9 @@
             "max": 0
           },
           "ui_loop_iteration": {
-            "mean": 31104.180833333332,
-            "p99": 31132.75,
-            "max": 31135.25
+            "mean": 32860.86083333333,
+            "p99": 32910.0,
+            "max": 32921.75
           },
           "blocks": 300
         },
@@ -51,9 +51,9 @@
           "name": "all knobs min",
           "description": "All seven knobs at 0 %",
           "core0_audio": {
-            "mean": 48244.63333333333,
-            "p99": 48430,
-            "max": 49033
+            "mean": 49335.70333333333,
+            "p99": 49570,
+            "max": 50176
           },
           "core1_audio": {
             "mean": 0.0,
@@ -61,9 +61,133 @@
             "max": 0
           },
           "ui_loop_iteration": {
-            "mean": 11176.040833333333,
-            "p99": 11208.75,
-            "max": 11211.25
+            "mean": 12932.720833333333,
+            "p99": 12984.0,
+            "max": 12992.5
+          },
+          "blocks": 300
+        }
+      ]
+    },
+    "beads": {
+      "scenarios": [
+        {
+          "name": "idle (centre density)",
+          "description": "All knobs at 50 %: no grains, reverb half",
+          "core0_audio": {
+            "mean": 76608.58333333333,
+            "p99": 85132,
+            "max": 87836
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 8909.034166666666,
+            "p99": 8944.0,
+            "max": 8949.75
+          },
+          "blocks": 300
+        },
+        {
+          "name": "grains 130 Hz",
+          "description": "Densest regular grains, long, 16-bit 44 kHz",
+          "core0_audio": {
+            "mean": 121391.72666666667,
+            "p99": 121571,
+            "max": 122181
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 26091.2175,
+            "p99": 26126.25,
+            "max": 26132.0
+          },
+          "blocks": 300
+        },
+        {
+          "name": "random cloud",
+          "description": "Random grains at the fastest rate, medium size",
+          "core0_audio": {
+            "mean": 118944.09,
+            "p99": 122328,
+            "max": 122361
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 26020.195833333335,
+            "p99": 26055.25,
+            "max": 26060.75
+          },
+          "blocks": 300
+        },
+        {
+          "name": "delay mode",
+          "description": "Size fully clockwise: two-tap delay",
+          "core0_audio": {
+            "mean": 79644.04,
+            "p99": 79776,
+            "max": 80350
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 26021.9675,
+            "p99": 26057.0,
+            "max": 26062.75
+          },
+          "blocks": 300
+        },
+        {
+          "name": "dirty tape grains",
+          "description": "8-bit mu-law at 22 kHz, dense grains",
+          "core0_audio": {
+            "mean": 71153.30333333333,
+            "p99": 76339,
+            "max": 77841
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 24874.948333333334,
+            "p99": 24896.0,
+            "max": 24902.25
+          },
+          "blocks": 300
+        },
+        {
+          "name": "vintage digital grains",
+          "description": "8-bit mu-law at 44 kHz, dense grains",
+          "core0_audio": {
+            "mean": 87007.41666666667,
+            "p99": 95657,
+            "max": 95848
+          },
+          "core1_audio": {
+            "mean": 0.0,
+            "p99": 0,
+            "max": 0
+          },
+          "ui_loop_iteration": {
+            "mean": 24874.941666666666,
+            "p99": 24896.0,
+            "max": 24902.25
           },
           "blocks": 300
         }

@@ -32,10 +32,34 @@ namespace
 constexpr int32_t kQ15One = 32768;
 constexpr int32_t kMinThreshold = 2600;
 constexpr int32_t kToneLowpassCoef = 3100; // ~700 Hz at 44 kHz
-constexpr uint32_t kWowInc = 58500u;       // ~0.6 Hz
-constexpr uint32_t kDriftInc = 14000u;     // ~0.15 Hz
-constexpr uint32_t kFlutterInc = 712000u;  // ~7.3 Hz
+// Modulator rates for the medium wow speed, as phase increments per sample at 44 kHz
+constexpr int32_t kWowInc = 58500;      // ~0.6 Hz
+constexpr int32_t kDriftInc = 14000;    // ~0.15 Hz
+constexpr int32_t kFlutterInc = 712000; // ~7.3 Hz
 constexpr int32_t kWowMaxSamples = 40;
+
+// Wow speeds: rate multiplier (Q8) for the three modulators and a depth multiplier (Q8). A faster modulation of the
+// same depth detunes more, so the fast setting backs the depth off. The slow one can only go up to 1.25x: the worst
+// case modulation (1.6 x depth) has to stay inside the 96-sample latency of the wow delay.
+struct WowSpeedSetting
+{
+    int32_t rate_q8;         // wow and drift
+    int32_t flutter_rate_q8; // flutter follows the speed less, it is a different mechanism
+    int32_t depth_q8;
+};
+constexpr WowSpeedSetting kWowSpeeds[3] = {
+    {102, 180, 320}, // slow:   ~0.24 Hz wow
+    {256, 256, 256}, // medium: ~0.6 Hz wow (the original fixed setting)
+    {563, 384, 154}, // fast:   ~1.3 Hz wow, about the rotation of a 78 rpm record
+};
+
+// Vinyl noise types
+constexpr int32_t kLowNoiseLpCoef = 3900;  // ~870 Hz one-pole low-pass
+constexpr int32_t kLowNoiseGain = 2;       // compensates the energy the low-pass removes
+constexpr int32_t kHighNoiseTilt = 22000;  // first difference, ~+4.5 dB tilt towards the treble
+constexpr int32_t kHighNoiseGainNum = 4;   // /5: keeps the loudness close to the unfiltered version
+constexpr int32_t kLowPopDecay = 31800;    // thumps ring about 35 samples
+constexpr int32_t kHighPopDecay = 26000;   // ticks last about 4 samples
 constexpr int32_t kBypassStep = 16;
 
 inline int32_t Clamp(int32_t value, int32_t low, int32_t high)
@@ -89,6 +113,32 @@ int32_t ApplyCv(int32_t param, int32_t cv_adc, int32_t adc_5v)
     }
     const int32_t delta = static_cast<int32_t>((static_cast<int64_t>(cv_adc) * kParamMax) / adc_5v);
     return Clamp(param + delta, 0, kParamMax);
+}
+
+NoiseType NoiseTypeFromSwitch(SwitchPosition position)
+{
+    switch (position)
+    {
+    case SwitchPosition::UP:
+        return NoiseType::LOW_PITCH;
+    case SwitchPosition::DOWN:
+        return NoiseType::OFF;
+    default:
+        return NoiseType::HIGH_PITCH;
+    }
+}
+
+WowSpeed WowSpeedFromSwitch(SwitchPosition position)
+{
+    switch (position)
+    {
+    case SwitchPosition::UP:
+        return WowSpeed::SLOW;
+    case SwitchPosition::DOWN:
+        return WowSpeed::FAST;
+    default:
+        return WowSpeed::MEDIUM;
+    }
 }
 
 void Chain::Init()
@@ -146,10 +196,42 @@ void Chain::SetParams(const Params &params)
 
     // Vinyl
     t.lowpass_coef = kParamMax - ((p.vinyl * 20767) >> 15);
-    t.noise_amp = (p.vinyl * 120) >> 15;
-    t.crackle_thresh = (p.vinyl * 45) >> 15;
-    t.crackle_amp = (p.vinyl * 5000) >> 15;
-    t.wow_depth = (p.wow * (kWowMaxSamples * 256)) >> 15;
+    int32_t noise_amp = (p.vinyl * 120) >> 15;
+    int32_t crackle_thresh = (p.vinyl * 45) >> 15;
+    int32_t crackle_amp = (p.vinyl * 5000) >> 15;
+    switch (p.noise_type)
+    {
+    case NoiseType::LOW_PITCH:
+        noise_amp *= kLowNoiseGain;
+        t.noise_tilt = 0;
+        t.noise_lp_coef = kLowNoiseLpCoef;
+        t.pop_decay = kLowPopDecay;
+        crackle_amp = (crackle_amp * 3) / 4;
+        break;
+    case NoiseType::OFF:
+        noise_amp = 0;
+        crackle_thresh = 0;
+        t.noise_tilt = 0;
+        t.noise_lp_coef = kParamMax;
+        t.pop_decay = kHighPopDecay;
+        break;
+    case NoiseType::HIGH_PITCH:
+    default:
+        noise_amp = (noise_amp * kHighNoiseGainNum) / 5;
+        t.noise_tilt = kHighNoiseTilt;
+        t.noise_lp_coef = kParamMax;
+        t.pop_decay = kHighPopDecay;
+        break;
+    }
+    t.noise_amp = noise_amp;
+    t.crackle_thresh = crackle_thresh;
+    t.crackle_amp = crackle_amp;
+
+    const WowSpeedSetting &speed = kWowSpeeds[static_cast<int>(p.wow_speed) < 3 ? static_cast<int>(p.wow_speed) : 1];
+    t.wow_depth = (((p.wow * (kWowMaxSamples * 256)) >> 15) * speed.depth_q8) >> 8;
+    t.wow_inc = (kWowInc * speed.rate_q8) >> 8;
+    t.drift_inc = (kDriftInc * speed.rate_q8) >> 8;
+    t.flutter_inc = (kFlutterInc * speed.flutter_rate_q8) >> 8;
 
     // Lo-fi
     t.lofi_step = 256 - ((p.lofi * 224) >> 15);
@@ -174,6 +256,12 @@ void Chain::UpdateBlock()
     Slew(current_.wow_depth, target_.wow_depth);
     Slew(current_.lowpass_coef, target_.lowpass_coef);
     Slew(current_.noise_amp, target_.noise_amp);
+    Slew(current_.noise_tilt, target_.noise_tilt);
+    Slew(current_.noise_lp_coef, target_.noise_lp_coef);
+    Slew(current_.pop_decay, target_.pop_decay);
+    Slew(current_.wow_inc, target_.wow_inc);
+    Slew(current_.drift_inc, target_.drift_inc);
+    Slew(current_.flutter_inc, target_.flutter_inc);
     Slew(current_.crackle_thresh, target_.crackle_thresh);
     Slew(current_.crackle_amp, target_.crackle_amp);
     Slew(current_.lofi_step, target_.lofi_step);
@@ -239,8 +327,9 @@ void Chain::ProcessSample(int32_t &left, int32_t &right)
     // 2. Tone (tilt around ~700 Hz, flat at centre)
     tone_lp_left_ += ((l - tone_lp_left_) * kToneLowpassCoef) >> 15;
     tone_lp_right_ += ((r - tone_lp_right_) * kToneLowpassCoef) >> 15;
-    l = ((tone_lp_left_ * (kQ15One - d.tone_tilt)) + ((l - tone_lp_left_) * (kQ15One + d.tone_tilt))) >> 15;
-    r = ((tone_lp_right_ * (kQ15One - d.tone_tilt)) + ((r - tone_lp_right_) * (kQ15One + d.tone_tilt))) >> 15;
+    // Operands are halved first: a loud transient with the treble tilt up overflows 32 bits otherwise
+    l = (((tone_lp_left_ * (kQ15One - d.tone_tilt)) >> 1) + (((l - tone_lp_left_) >> 1) * (kQ15One + d.tone_tilt))) >> 14;
+    r = (((tone_lp_right_ * (kQ15One - d.tone_tilt)) >> 1) + (((r - tone_lp_right_) >> 1) * (kQ15One + d.tone_tilt))) >> 14;
     l = Clamp(l, -32767, 32767);
     r = Clamp(r, -32767, 32767);
 
@@ -276,9 +365,9 @@ void Chain::ProcessSample(int32_t &left, int32_t &right)
     // 4. Vinyl: wow/flutter through a short modulated delay
     ring_left_[write_index] = static_cast<int16_t>(l);
     ring_right_[write_index] = static_cast<int16_t>(r);
-    wow_phase_ += kWowInc;
-    drift_phase_ += kDriftInc;
-    flutter_phase_ += kFlutterInc;
+    wow_phase_ += static_cast<uint32_t>(d.wow_inc);
+    drift_phase_ += static_cast<uint32_t>(d.drift_inc);
+    flutter_phase_ += static_cast<uint32_t>(d.flutter_inc);
     const int32_t depth = d.wow_depth;
     const int32_t modulation = ((Parabolic(wow_phase_) * depth) >> 15) + ((Parabolic(drift_phase_) * depth) >> 16) +
                                ((Parabolic(flutter_phase_) * (depth / 10)) >> 15);
@@ -303,19 +392,43 @@ void Chain::ProcessSample(int32_t &left, int32_t &right)
         r = vinyl_lp_right_;
     }
 
-    // Vinyl: hiss and crackle
+    // Vinyl: hiss and crackle. The noise type (low rumble / bright hiss / off) shapes both.
     if (d.noise_amp > 0 || d.crackle_thresh > 0)
     {
         const uint32_t random = NextRandom();
-        l += (((static_cast<int32_t>(random >> 16)) - 32768) * d.noise_amp) >> 15;
-        r += (((static_cast<int32_t>(random & 0xFFFFu)) - 32768) * d.noise_amp) >> 15;
+        const int32_t white_left = static_cast<int32_t>(random >> 16) - 32768;
+        const int32_t white_right = static_cast<int32_t>(random & 0xFFFFu) - 32768;
+        const int32_t shaped_left = white_left - ((noise_prev_left_ * d.noise_tilt) >> 15);
+        const int32_t shaped_right = white_right - ((noise_prev_right_ * d.noise_tilt) >> 15);
+        noise_prev_left_ = white_left;
+        noise_prev_right_ = white_right;
         if (static_cast<int32_t>(NextRandom() & 0xFFFFu) < d.crackle_thresh)
         {
             pop_ = (((static_cast<int32_t>(NextRandom() >> 16)) - 32768) * d.crackle_amp) >> 15;
         }
-        l += pop_;
-        r += (pop_ * 3) >> 2;
-        pop_ = (pop_ * 26000) >> 15;
+        int32_t noise_left = ((shaped_left * d.noise_amp) >> 15) + pop_;
+        int32_t noise_right = ((shaped_right * d.noise_amp) >> 15) + ((pop_ * 3) >> 2);
+        pop_ = (pop_ * d.pop_decay) >> 15;
+        if (d.noise_lp_coef >= kParamMax)
+        {
+            noise_lp_left_ = noise_left;
+            noise_lp_right_ = noise_right;
+        }
+        else
+        {
+            noise_lp_left_ += ((noise_left - noise_lp_left_) * d.noise_lp_coef) >> 15;
+            noise_lp_right_ += ((noise_right - noise_lp_right_) * d.noise_lp_coef) >> 15;
+            noise_left = noise_lp_left_;
+            noise_right = noise_lp_right_;
+        }
+        l += noise_left;
+        r += noise_right;
+    }
+    else
+    {
+        pop_ = 0;
+        noise_prev_left_ = noise_prev_right_ = 0;
+        noise_lp_left_ = noise_lp_right_ = 0;
     }
 
     // 5. Lo-fi: sample rate then bit depth reduction

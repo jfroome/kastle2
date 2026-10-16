@@ -1,3 +1,4 @@
+import beadsUrl from "./beads.wasm?url";
 import examplesynthUrl from "./examplesynth.wasm?url";
 import masterblasterUrl from "./masterblaster.wasm?url";
 import templateUrl from "./template.wasm?url";
@@ -5,6 +6,7 @@ import wavebardUrl from "./wavebard.wasm?url";
 
 const wasmUrls: Record<string, string> = {
   masterblaster: masterblasterUrl,
+  beads: beadsUrl,
   examplesynth: examplesynthUrl,
   wavebard: wavebardUrl,
   template: templateUrl,

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Builds the unmodified Kastle 2 firmware (Base + Hardware + app) for the browser with Emscripten.
-#   ./build_firmware.sh masterblaster|examplesynth|wavebard|template
+#   ./build_firmware.sh masterblaster|beads|examplesynth|wavebard|template
 # The pico-sdk is replaced by the shims in ../hal. Requires emcc (brew install emscripten).
 set -euo pipefail
 
-APP="${1:?usage: build_firmware.sh masterblaster|examplesynth|wavebard|template}"
+APP="${1:?usage: build_firmware.sh masterblaster|beads|examplesynth|wavebard|template}"
 APP_DEFS=()
 MEMORY=${FW_INITIAL_MEMORY:-16777216}
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -17,6 +17,7 @@ mkdir -p "$OUT_DIR" "$BUILD/overlay/common"
 
 case "$APP" in
   masterblaster) APP_SOURCES=("$SRC/apps/MasterBlaster/AppMasterBlaster.cpp" "$SRC/apps/MasterBlaster/MasterBlasterDsp.cpp"); APP_INC=("-I$SRC/apps/MasterBlaster") ;;
+  beads)         APP_SOURCES=("$SRC/apps/Beads/AppBeads.cpp" "$SRC/apps/Beads/BeadsDsp.cpp"); APP_INC=("-I$SRC/apps/Beads") ;;
   template)      APP_SOURCES=("$SRC/apps/Template/AppTemplate.cpp"); APP_INC=("-I$SRC/apps/Template") ;;
   examplesynth)  APP_SOURCES=("$SRC/apps/ExampleSynth/AppExampleSynth.cpp"); APP_INC=("-I$SRC/apps/ExampleSynth") ;;
   wavebard)      APP_SOURCES=("$SRC/apps/WaveBard/AppWaveBard.cpp"); APP_INC=("-I$SRC/apps/WaveBard"); APP_DEFS=("-DFW_USER_DATA_BYTES=8388608"); MEMORY=${FW_INITIAL_MEMORY:-33554432} ;;

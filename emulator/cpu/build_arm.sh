@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the firmware host (real firmware + HAL stand-in) for Cortex-M0+ with the same optimisation as the real
 # firmware (-O3), to be run in the cycle-counting simulator cpu/profile.py.
-#   ./build_arm.sh masterblaster|examplesynth|wavebard|template
+#   ./build_arm.sh masterblaster|beads|examplesynth|wavebard|template
 set -euo pipefail
 APP="${1:?usage: build_arm.sh <app>}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -25,6 +25,7 @@ case "$APP" in
   masterblaster) APP_SOURCES=("$SRC/apps/MasterBlaster/AppMasterBlaster.cpp" "$SRC/apps/MasterBlaster/MasterBlasterDsp.cpp"); APP_INC=("-I$SRC/apps/MasterBlaster") ;;
   examplesynth)  APP_SOURCES=("$SRC/apps/ExampleSynth/AppExampleSynth.cpp"); APP_INC=("-I$SRC/apps/ExampleSynth") ;;
   wavebard)      APP_SOURCES=("$SRC/apps/WaveBard/AppWaveBard.cpp"); APP_INC=("-I$SRC/apps/WaveBard"); APP_DEFS=("-DFW_USER_DATA_BYTES=8388608") ;;
+  beads)         APP_SOURCES=("$SRC/apps/Beads/AppBeads.cpp" "$SRC/apps/Beads/BeadsDsp.cpp"); APP_INC=("-I$SRC/apps/Beads") ;;
   template)      APP_SOURCES=("$SRC/apps/Template/AppTemplate.cpp"); APP_INC=("-I$SRC/apps/Template") ;;
   *) echo "unknown app" >&2; exit 1 ;;
 esac

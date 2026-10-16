@@ -85,7 +85,9 @@ void PumpAdc(int n)
         emu_adc_hw.cs &= ~ADC_CS_START_ONCE_BITS;
         // GPIO 13/14/15 = MUX C/B/A
         const uint32_t mux = (board.level_out[15] ? 1u : 0u) | (board.level_out[14] ? 2u : 0u) | (board.level_out[13] ? 4u : 0u);
-        board.adc_fifo = board.adc_raw[board.adc_selected & 3][mux & 7];
+        // Only ADC0/ADC1 sit behind the multiplexer; the pitch inputs (ADC2/ADC3) are wired straight through
+        const uint32_t hw = board.adc_selected & 3;
+        board.adc_fifo = board.adc_raw[hw][hw < 2 ? (mux & 7) : 0];
         adc_handler();
     }
 }

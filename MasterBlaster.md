@@ -21,7 +21,7 @@ App ID: `0x31`. Firmware: `kastle2-master-blaster.uf2`. Host DSP tests: `code/te
 | Saturate | 1x–8x input drive into a soft cubic shaper (reaches full saturation at mid knob), slight asymmetry for even harmonics, level compensation, DC blocker |
 | Tone | Tilt EQ pivoting at about 700 Hz. Centre = flat, left = darker, right = brighter |
 | Bus comp | Stereo-linked peak detector, fixed 4:1 ratio, knob lowers the threshold, automatic makeup gain, attack/release scaled by the speed control |
-| Vinyl | Wow/flutter/drift pitch wobble (modulated delay), high-frequency rolloff, hiss and crackle |
+| Vinyl | Wow/flutter/drift pitch wobble (modulated delay, three speeds from the right switch), high-frequency rolloff, hiss and crackle (low / high / off from the left switch) |
 | Lo-fi | Sample-rate reduction (down to about 1/8) and bit reduction (down to 8 bit) |
 | Width | Mid/side. 0 = mono, centre = unchanged, max = 2x side |
 | Mix | Parallel dry/wet. The dry path is delay-matched so it never phases against the wet path |
@@ -54,6 +54,21 @@ All parameters are available from the three pot layers. Pots keep their last val
  MODE tap : bypass on/off
 ```
 
+### Panel switches (Citadel)
+
+The two 3-position switches under the big knob (silkscreened RND / INV, labelled CV and GATE on the Wave Bard panel) shape the vinyl stage. They work in every layer and are read continuously, so you can flip them while playing.
+
+| Switch | Up | Middle | Down |
+|---|---|---|---|
+| **Left (CV)**: vinyl noise | Low-pitched: dark, rumbly hiss and soft thumps | High-pitched: bright hiss and sharp ticks | **Off**: no hiss and no crackle |
+| **Right (GATE)**: wow speed | Slow, about 0.24 Hz | Medium, about 0.6 Hz | Fast, about 1.3 Hz (a 78 rpm record turns at 1.3 Hz) |
+
+- The **Vinyl knob (K4)** still sets the amount of noise, crackle and treble rolloff. With the noise switch down only the hiss and crackle go away; the rolloff stays.
+- **SHIFT + K4** still sets the wow depth. The speed switch changes only the rate. At the fast setting the depth is backed off a little (and raised a little at slow) so all three speeds detune by a similar amount.
+- With both switches in the middle the module behaves as it did before the switches were added (the high-pitched noise is a touch brighter and about 2 dB quieter than the old plain hiss).
+- A switch position only takes effect after it has been stable for 40 ms. The switches sit on the same tri-state inputs as the C IN and G IN jacks, so a cable patched into one of those jacks will most likely override its switch (not tested on hardware). Keep them unpatched while you use the switches.
+- Noise and speed changes are smoothed (no clicks).
+
 ### Jacks (Citadel)
 
 CV inputs are bipolar and **additive**: 0 V (or nothing patched) leaves the knob untouched, +5 V adds a full knob range, negative voltage subtracts. Results are clamped.
@@ -82,9 +97,15 @@ CV inputs are bipolar and **additive**: 0 V (or nothing patched) leaves the knob
 |---|---|
 | Transparent glue | Drive 20%, Tone centre, Comp 30%, SHIFT Comp speed 60%, rest 0, Mix 100% |
 | SSL-style squeeze | Drive 30%, Comp 60-70%, speed fast, Mix 60% for parallel compression |
-| SP-404 vinyl sim | Drive 40%, Tone slightly dark, Vinyl 50%, Wow 30%, Lo-fi 15% |
+| SP-404 vinyl sim | Drive 40%, Tone slightly dark, Vinyl 50%, Wow 30%, Lo-fi 15%, both switches in the middle |
+| Dusty, slow warp | Vinyl 60%, Wow 40%, noise switch up (low-pitched), wow switch up (slow) |
+| Clean but warped | Vinyl 20%, Wow 50%, noise switch down (off), wow switch to taste |
 | OTO Boum style crush | Drive 70%, Comp 80%, Lo-fi 50%, Output down to compensate, Mix 70% |
 | Mono-safe low end | SHIFT Width down to 0 |
+
+## Knob jumps glide
+
+When a knob jumps to a new value (you pick it up in the SHIFT or MODE layer, or it is released from frozen), the value glides there over about 250 ms with an ease-in/ease-out curve instead of snapping, so things like lo-fi, drive or output don't produce a harsh transient. Turning a knob normally follows it immediately, with no lag. A move of more than about 5% of the range in one step counts as a jump. CV is added after the glide, so CV modulation is not slowed down. The first 0.6 s after power-up snaps to the knob positions.
 
 ## Notes and limits
 
@@ -99,7 +120,7 @@ CV inputs are bipolar and **additive**: 0 V (or nothing patched) leaves the knob
 cmake -S code/tests -B /tmp/mbt && cmake --build /tmp/mbt && ctest --test-dir /tmp/mbt
 ```
 
-The tests compile the real `MasterBlasterDsp.cpp` and check bounds (fuzzed parameters), silence, transparency at neutral settings, saturation, compression, lo-fi quantisation, wow, vinyl filtering, width, limiter, click-free bypass, parameter sweeps and the CV/pot mappings.
+The tests compile the real `MasterBlasterDsp.cpp` and check bounds (fuzzed parameters), silence, transparency at neutral settings, saturation, compression, lo-fi quantisation, knob glides, wow, wow speeds, vinyl filtering, the noise types, the switch mapping and debounce, width, limiter, click-free bypass, parameter sweeps and the CV/pot mappings.
 
 ### Browser emulator
 

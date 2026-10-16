@@ -5,7 +5,7 @@ import { runBench } from "./suite";
 import { runParamSweep } from "./sweep";
 
 describe("bench suite (real firmware via wasm)", () => {
-  for (const id of ["masterblaster", "wavebard", "examplesynth", "template"]) {
+  for (const id of ["masterblaster", "beads", "wavebard", "examplesynth", "template"]) {
     it(`passes every test for ${id}`, async () => {
       const results = await runBench(nodeBenchEnv(id));
       for (const r of results) console.log(`${id} ${r.pass ? (r.warn ? "WARN" : "PASS") : "FAIL"} ${r.name}: ${r.detail} (${r.durationMs.toFixed(0)} ms)`);

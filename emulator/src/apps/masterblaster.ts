@@ -1,4 +1,4 @@
-import type { ControlSpec, FirmwareApp, JackSpec, LedSpec, Preset, SignalStage } from "../core/app";
+import type { ControlSpec, FirmwareApp, JackSpec, LedSpec, Preset, SignalStage, SwitchSpec } from "../core/app";
 import { PARAM_MAX, SAMPLE_RATE } from "../core/constants";
 import type { BoardState } from "../firmware/board";
 import { MB_DEFAULTS } from "../dsp/masterblaster";
@@ -33,7 +33,7 @@ const appControls: ControlSpec[] = [
   },
   {
     key: "vinyl", label: "Vinyl", pot: 3, layer: "NORMAL", owner: "app", low: "clean", high: "worn",
-    description: "SP-404 style vinyl: high-frequency rolloff, hiss and crackle.",
+    description: "SP-404 style vinyl: high-frequency rolloff, hiss and crackle. The left panel switch picks low-pitched or high-pitched noise, or turns the noise off (the rolloff stays).",
     default: MB_DEFAULTS.vinyl, format: pct,
   },
   {
@@ -73,7 +73,7 @@ const appControls: ControlSpec[] = [
   },
   {
     key: "wow", label: "Wow", pot: 3, layer: "SHIFT", owner: "app", low: "steady", high: "warped",
-    description: "Wow, flutter and drift pitch wobble (modulated delay), the vinyl warp.",
+    description: "Wow, flutter and drift pitch wobble (modulated delay), the vinyl warp. This knob sets the depth; the right panel switch sets the speed.",
     default: MB_DEFAULTS.wow,
     format: (v) => (v < 100 ? "off" : `±${((v * 40) / PARAM_MAX / SAMPLE_RATE * 1000).toFixed(2)} ms`),
   },
@@ -86,9 +86,22 @@ const appControls: ControlSpec[] = [
 ];
 
 const appJacks: JackSpec[] = [
-  { input: "PARAM_1", label: "PARAM 1 → Drive", description: "Additive CV. 0 V = no change, +5 V adds a full knob range, negative subtracts.", range: [-5, 5] },
-  { input: "PARAM_2", label: "PARAM 2 → Comp", description: "Additive CV on the bus compressor amount.", range: [-5, 5] },
-  { input: "PARAM_3", label: "PARAM 3 → Lo-Fi", description: "Additive CV on the lo-fi crush.", range: [-5, 5] },
+  { input: "PARAM_1", short: "DRIVE", label: "PARAM 1 → Drive", description: "Additive CV. 0 V = no change, +5 V adds a full knob range, negative subtracts.", range: [-5, 5] },
+  { input: "PARAM_2", short: "COMP", label: "PARAM 2 → Comp", description: "Additive CV on the bus compressor amount.", range: [-5, 5] },
+  { input: "PARAM_3", short: "LO-FI", label: "PARAM 3 → Lo-Fi", description: "Additive CV on the lo-fi crush.", range: [-5, 5] },
+];
+
+const appSwitches: SwitchSpec[] = [
+  {
+    input: "FEED_3", panelLabel: "CV", label: "Vinyl noise",
+    description: "Left switch (INV CV): the pitch of the vinyl hiss and crackle: low-pitched (up), high-pitched (middle) or off (down).",
+    up: "low", middle: "high", down: "off",
+  },
+  {
+    input: "FEED_1", panelLabel: "GATE", label: "Wow speed",
+    description: "Right switch (INV GATE): speed of the wow / drift / flutter: slow ~0.24 Hz, medium ~0.6 Hz, fast ~1.3 Hz. SHIFT+K4 still sets the amount.",
+    up: "slow", middle: "medium", down: "fast",
+  },
 ];
 
 const appLeds: LedSpec[] = [
@@ -102,7 +115,7 @@ const stages: SignalStage[] = [
   { name: "Saturate", detail: "K1 drive, soft cubic + asymmetry", keys: ["drive"] },
   { name: "Tone", detail: "K2 tilt EQ @ 700 Hz", keys: ["tone"] },
   { name: "Bus Comp", detail: "K3 amount, SHIFT+K2 speed, 4:1", keys: ["comp", "comp_speed"] },
-  { name: "Vinyl", detail: "K4 rolloff/hiss/crackle, SHIFT+K4 wow", keys: ["vinyl", "wow"] },
+  { name: "Vinyl", detail: "K4 rolloff/noise, left switch noise type, SHIFT+K4 wow depth, right switch wow speed", keys: ["vinyl", "wow"] },
   { name: "Lo-Fi", detail: "K5 sample-rate + bit crush", keys: ["lofi"] },
   { name: "Width", detail: "SHIFT+K6 mid/side", keys: ["width"] },
   { name: "Mix", detail: "K6 dry/wet (dry delay-matched)", keys: ["mix"] },
@@ -149,6 +162,7 @@ export class MasterBlasterApp implements FirmwareApp {
   readonly controls = appControls;
   readonly jacks = appJacks;
   readonly leds = appLeds;
+  readonly switches = appSwitches;
   readonly stages = stages;
   readonly presets = presets;
   readonly hasBypass = true;

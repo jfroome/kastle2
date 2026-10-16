@@ -202,8 +202,10 @@ def pink_ish(n, rng, level=0.25):
 def run_scenario(elf, scenario, blocks_warmup=150, blocks_measure=300):
     p = Profiler(elf)
     rng = random.Random(1234)
+    pots = scenario["pots"]
+    pots = pots if isinstance(pots, list) else [pots] * 7
     for n in range(1, 8):
-        p.call("fw_set_adc", 1, POT_ROUTE[n], int(20 + scenario["pots"] * 4058))
+        p.call("fw_set_adc", 1, POT_ROUTE[n], int(20 + pots[n - 1] * 4058))
     for pin, level in ((1, 1), (17, 1), (18, 1), (19, 1), (22, 1), (25, 1), (24, 1), (23, 1)):
         p.call("fw_set_pin", pin, level)
     ud = scenario.get("user_data")
@@ -213,6 +215,24 @@ def run_scenario(elf, scenario, blocks_warmup=150, blocks_measure=300):
     p.call("fw_boot")
     in_ptr = p.call("fw_input")
     p.hook_markers()
+
+    # Panel gestures (hold SHIFT, move a pot, ...) run unmeasured before the timed blocks
+    def idle_blocks(n):
+        for _ in range(n):
+            p.call("fw_advance_block_time")
+            p.call("fw_ui_step", 4)
+            p.call("fw_audio_block")
+
+    for step in scenario.get("script", []):
+        kind = step[0]
+        if kind == "wait":
+            idle_blocks(step[1])
+        elif kind == "shift":
+            p.call("fw_set_pin", 17, 0 if step[1] else 1)
+        elif kind == "mode":
+            p.call("fw_set_pin", 18, 0 if step[1] else 1)
+        elif kind == "pot":
+            p.call("fw_set_adc", 1, POT_ROUTE[step[1]], int(20 + step[2] * 4058))
 
     audio, core1, ui = [], [], []
     notes = [48, 51, 55, 60, 63, 60, 55, 51]
@@ -256,6 +276,19 @@ def run_scenario(elf, scenario, blocks_warmup=150, blocks_measure=300):
 
 
 def scenarios_for(app):
+    if app == "beads":
+        # K1 time, K2 size, K3 shape, K4 density, K5 pitch, K6 dry/wet, K7 reverb
+        quality = lambda k: [("shift", True), ("wait", 260), ("pot", 2, k), ("wait", 40), ("shift", False), ("wait", 100)]
+        def sc(name, desc, pots, script=()):
+            return {"name": name, "description": desc, "pots": pots, "script": list(script)}
+        return [
+            sc("idle (centre density)", "All knobs at 50 %: no grains, reverb half", [0.5] * 7),
+            sc("grains 130 Hz", "Densest regular grains, long, 16-bit 44 kHz", [0.5, 0.9, 0.3, 0.0, 0.5, 0.8, 0.5]),
+            sc("random cloud", "Random grains at the fastest rate, medium size", [0.5, 0.7, 0.3, 1.0, 0.5, 0.8, 0.6]),
+            sc("delay mode", "Size fully clockwise: two-tap delay", [0.5, 1.0, 0.3, 0.45, 0.5, 0.8, 0.6]),
+            sc("dirty tape grains", "8-bit mu-law at 22 kHz, dense grains", [0.5, 0.9, 0.3, 0.0, 0.5, 0.8, 0.6], quality(0.0)),
+            sc("vintage digital grains", "8-bit mu-law at 44 kHz, dense grains", [0.5, 0.9, 0.3, 0.0, 0.5, 0.8, 0.6], quality(0.6)),
+        ]
     base = [
         {"name": "defaults", "description": "All knobs at 50 %, demo-style stereo noise input", "pots": 0.5},
         {"name": "all knobs max", "description": "All seven knobs at 100 %", "pots": 1.0},

@@ -22,11 +22,37 @@ export interface ControlSpec {
 
 export interface JackSpec {
   input: JackName;
+  /** Full label for tooltips and the CV panel */
   label: string;
+  /** Short caption under the jack on the faceplate */
+  short?: string;
   description: string;
+  /** A digital gate input (TRIG): held with the mouse instead of patched with a voltage */
+  gate?: boolean;
   /** Voltage range shown on the slider */
   range?: [number, number];
 }
+
+/** One of the two 3-pole switches on the Citadel (silkscreened RND / INV, they sit on the tri-state FEED inputs) */
+export interface SwitchSpec {
+  /** FEED_3 is the left switch (CV), FEED_1 the right one (GATE) */
+  input: "FEED_1" | "FEED_3";
+  /** Caption on the panel, e.g. "CV" / "GATE" */
+  panelLabel: string;
+  /** What the switch does in this app */
+  label: string;
+  description: string;
+  /** What each position does, shown next to the switch */
+  up: string;
+  middle: string;
+  down: string;
+}
+
+/** 0 = up (line driven high, "RND"), 1 = middle (floating), 2 = down (line driven low, "INV") */
+export type SwitchPosition = 0 | 1 | 2;
+
+/** Voltage the emulated switch puts on its FEED input; undefined leaves the jack floating */
+export const switchVolts = (position: SwitchPosition): number | undefined => (position === 0 ? 5 : position === 2 ? 0 : undefined);
 
 export interface LedSpec {
   index: number;
@@ -57,6 +83,8 @@ export interface FirmwareApp {
   readonly controls: ControlSpec[];
   readonly jacks: JackSpec[];
   readonly leds: LedSpec[];
+  /** Panel switches the app uses; apps without any leave this out */
+  readonly switches?: SwitchSpec[];
   readonly stages: SignalStage[];
   readonly presets: Preset[];
   readonly buttons: { shift: string; mode: string };

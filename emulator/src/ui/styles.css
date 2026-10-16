@@ -155,7 +155,8 @@ table.stats { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
     "jacks jacks jacks"
     "k1 k4 k5"
     "k2 k4 k6"
-    "k3 btns k7";
+    "k3 sw k7"
+    "btns btns btns";
   gap: 6px 10px;
   background: #0c0e11;
   border: 1px solid #000;
@@ -195,6 +196,18 @@ table.stats { width: 100%; border-collapse: collapse; font-variant-numeric: tabu
 .button-cell { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .button-cell.shift { grid-area: btns; justify-self: start; }
 .button-cell.mode { grid-area: btns; justify-self: end; }
+.switch-cell { grid-area: sw; display: flex; justify-content: center; align-items: flex-start; gap: 10px; }
+.panel-switch { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 80px; }
+.switch-caption { font-size: 10px; color: #aeb6bf; letter-spacing: 0.05em; text-transform: uppercase; }
+.switch-body { display: flex; align-items: center; gap: 6px; }
+.switch-track { position: relative; width: 22px; height: 54px; border-radius: 11px; background: #14181d; border: 2px solid #4a515a; display: grid; grid-template-rows: 1fr 1fr 1fr; cursor: pointer; }
+.switch-track:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.switch-zone { background: transparent; border: 0; padding: 0; cursor: pointer; }
+.switch-lever { position: absolute; left: 50%; width: 14px; height: 14px; margin: 0 0 0 -7px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #d8dee5, #6b7480 70%); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); pointer-events: none; transition: top 0.08s; }
+.switch-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: space-between; height: 54px; font-size: 9px; color: #6f7a86; }
+.switch-options li { cursor: pointer; white-space: nowrap; line-height: 1; }
+.switch-options li.on { color: var(--accent); font-weight: 700; }
+.switch-panel-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: #d8dee5; background: #1b2026; border-radius: 6px; padding: 0 6px; }
 .leds-cell { grid-area: btns; justify-self: center; align-self: start; display: flex; gap: 10px; margin-top: 4px; }
 .hw-button.round { min-width: 0; width: 54px; height: 54px; border-radius: 50%; padding: 0; background: radial-gradient(circle at 40% 35%, #3a3f46, #0b0c0e 70%); border: 2px solid #4a515a; }
 .hw-button.round.down { background: radial-gradient(circle at 40% 35%, #5da0ff, #12315c 70%); border-color: var(--accent2); }
@@ -223,3 +236,5 @@ button.deliver { margin-left: auto; background: #1d3a2a; border-color: #2f7a4d; 
 .status { padding: 8px 10px; border-radius: 6px; background: var(--panel2); }
 .status.ok { color: var(--good); }
 .status.error { color: var(--bad); }
+
+.jack-label.unused { opacity: 0.45; }

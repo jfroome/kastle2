@@ -13,7 +13,7 @@ export function CvPanel() {
     <section className="panel">
       <h3>CV jacks</h3>
       <div className="cv-grid">
-        {emu.app.jacks.map((jack) => {
+        {emu.app.jacks.filter((j) => !j.gate).map((jack) => {
           const ch = emu.cv[jack.input];
           if (!ch) return null;
           const [lo, hi] = jack.range ?? [-5, 5];

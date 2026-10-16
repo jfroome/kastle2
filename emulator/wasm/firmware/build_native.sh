@@ -15,6 +15,7 @@ sed -e 's|^#define USER_DATA_SECTION_BEGIN .*|extern "C" size_t emu_user_data_ba
     "$SRC/common/config.hpp" > "$BUILD/overlay/common/config.hpp"
 case "$APP" in
   masterblaster) APP_SOURCES=("$SRC/apps/MasterBlaster/AppMasterBlaster.cpp" "$SRC/apps/MasterBlaster/MasterBlasterDsp.cpp"); APP_INC=("-I$SRC/apps/MasterBlaster") ;;
+  beads)         APP_SOURCES=("$SRC/apps/Beads/AppBeads.cpp" "$SRC/apps/Beads/BeadsDsp.cpp"); APP_INC=("-I$SRC/apps/Beads") ;;
   template)      APP_SOURCES=("$SRC/apps/Template/AppTemplate.cpp"); APP_INC=("-I$SRC/apps/Template") ;;
   examplesynth)  APP_SOURCES=("$SRC/apps/ExampleSynth/AppExampleSynth.cpp"); APP_INC=("-I$SRC/apps/ExampleSynth") ;;
   wavebard)      APP_SOURCES=("$SRC/apps/WaveBard/AppWaveBard.cpp"); APP_INC=("-I$SRC/apps/WaveBard"); APP_DEFS=("-DFW_USER_DATA_BYTES=8388608") ;;

@@ -1,11 +1,53 @@
 import { useEffect, useRef, useState } from "react";
 import { PARAM_MAX } from "../core/constants";
+import type { SwitchPosition, SwitchSpec } from "../core/app";
 import type { Layer } from "../firmware/board";
 import type { JackName } from "../firmware/frontend";
 import { Knob } from "./Knob";
 import { useEmu } from "./useEmu";
 
 const LAYER_LABEL: Partial<Record<Layer, string>> = { NORMAL: "NORMAL", SHIFT: "SHIFT held", MODE: "MODE held", SETTINGS: "SHIFT+MODE" };
+
+/** A 3-pole panel switch: click the top, middle or bottom of the track (or use the arrow keys) */
+function PanelSwitch({ spec, position, onChange }: { spec: SwitchSpec; position: SwitchPosition; onChange: (p: SwitchPosition) => void }) {
+  const names = [spec.up, spec.middle, spec.down];
+  return (
+    <div className="panel-switch" title={spec.description}>
+      <div className="switch-caption">{spec.label}</div>
+      <div className="switch-body">
+        <div
+          className="switch-track"
+          role="slider"
+          tabIndex={0}
+          aria-label={`${spec.label} switch (${spec.panelLabel})`}
+          aria-valuemin={0}
+          aria-valuemax={2}
+          aria-valuenow={position}
+          aria-valuetext={names[position]}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowUp") onChange(Math.max(0, position - 1) as SwitchPosition);
+            else if (e.key === "ArrowDown") onChange(Math.min(2, position + 1) as SwitchPosition);
+            else return;
+            e.preventDefault();
+          }}
+        >
+          {([0, 1, 2] as SwitchPosition[]).map((p) => (
+            <button key={p} className="switch-zone" aria-label={names[p]} tabIndex={-1} onClick={() => onChange(p)} />
+          ))}
+          <span className="switch-lever" style={{ top: `${2 + position * 17}px` }} />
+        </div>
+        <ul className="switch-options">
+          {names.map((n, i) => (
+            <li key={n} className={position === i ? "on" : ""} onClick={() => onChange(i as SwitchPosition)}>
+              {n}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="switch-panel-label">{spec.panelLabel}</div>
+    </div>
+  );
+}
 
 function Led({ r, g, b, label }: { r: number; g: number; b: number; label: string }) {
   const level = Math.max(r, g, b) / 255;
@@ -38,6 +80,8 @@ interface JackProps {
 function Jack({ label, input, sub, level, kind = "in", gate }: JackProps) {
   const emu = useEmu();
   const spec = input ? emu.app.jacks.find((j) => j.input === input) : undefined;
+  // The caption comes from the running firmware's spec; unused jacks keep the position name of the Wave Bard panel
+  const caption = spec?.short ?? label;
   const patched = input ? !!emu.cv[input]?.patched : false;
   const interactive = !!spec || gate;
   const onDown = () => {
@@ -56,8 +100,8 @@ function Jack({ label, input, sub, level, kind = "in", gate }: JackProps) {
         onPointerLeave={() => gate && emu.panel.trig && emu.setTrig(false)}
         aria-label={label}
       />
-      <span className="jack-label">{label}</span>
-      {sub && <span className="jack-sub">{sub}</span>}
+      <span className={`jack-label ${input && !spec ? "unused" : ""}`}>{caption}</span>
+      {sub && !spec?.short && <span className="jack-sub">{sub}</span>}
     </div>
   );
 }
@@ -198,6 +242,14 @@ export function Faceplate() {
         <div className="knob-cell k5">{knob(4, 90)}</div>
         <div className="knob-cell k6">{knob(5, 90)}</div>
         <div className="knob-cell k7">{knob(6, 76)}</div>
+
+        {app.switches && app.switches.length > 0 && (
+          <div className="switch-cell">
+            {app.switches.map((sw) => (
+              <PanelSwitch key={sw.input} spec={sw} position={emu.switchPosition(sw.input)} onChange={(p) => emu.setSwitch(sw.input, p)} />
+            ))}
+          </div>
+        )}
 
         <div className="button-cell shift">
           <button

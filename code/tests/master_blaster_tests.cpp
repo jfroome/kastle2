@@ -348,6 +348,275 @@ int TestVinyl()
     return 0;
 }
 
+
+// ---- front-panel switches
+
+int TestSwitchMapping()
+{
+    CHECK(NoiseTypeFromSwitch(SwitchPosition::UP) == NoiseType::LOW_PITCH);
+    CHECK(NoiseTypeFromSwitch(SwitchPosition::MIDDLE) == NoiseType::HIGH_PITCH);
+    CHECK(NoiseTypeFromSwitch(SwitchPosition::DOWN) == NoiseType::OFF);
+    CHECK(WowSpeedFromSwitch(SwitchPosition::UP) == WowSpeed::SLOW);
+    CHECK(WowSpeedFromSwitch(SwitchPosition::MIDDLE) == WowSpeed::MEDIUM);
+    CHECK(WowSpeedFromSwitch(SwitchPosition::DOWN) == WowSpeed::FAST);
+    // A default Params matches the middle switch positions, so an unpatched module sounds like before
+    Params p;
+    CHECK(p.noise_type == NoiseTypeFromSwitch(SwitchPosition::MIDDLE));
+    CHECK(p.wow_speed == WowSpeedFromSwitch(SwitchPosition::MIDDLE));
+    return 0;
+}
+
+int TestSwitchDebounce()
+{
+    SwitchDebouncer d;
+    // The first reading is taken at once
+    CHECK(d.Update(SwitchPosition::UP, 1000) == SwitchPosition::UP);
+    // A change must hold for kStableMs
+    CHECK(d.Update(SwitchPosition::DOWN, 1010) == SwitchPosition::UP);
+    CHECK(d.Update(SwitchPosition::DOWN, 1040) == SwitchPosition::UP);
+    CHECK(d.Update(SwitchPosition::DOWN, 1010 + SwitchDebouncer::kStableMs) == SwitchPosition::DOWN);
+    // A patched signal that keeps flipping never changes the result
+    for (uint32_t t = 2000; t < 4000; t += 10)
+    {
+        const SwitchPosition reading = (t / 10) % 2 ? SwitchPosition::UP : SwitchPosition::MIDDLE;
+        CHECK(d.Update(reading, t) == SwitchPosition::DOWN);
+    }
+    // A glitch that goes back is ignored
+    CHECK(d.Update(SwitchPosition::MIDDLE, 5000) == SwitchPosition::DOWN);
+    CHECK(d.Update(SwitchPosition::DOWN, 5020) == SwitchPosition::DOWN);
+    CHECK(d.Update(SwitchPosition::DOWN, 5100) == SwitchPosition::DOWN);
+    return 0;
+}
+
+struct NoiseStats
+{
+    double rms;
+    double brightness; ///< rms of the first difference over rms: grows with high frequencies
+    int32_t peak;
+};
+
+NoiseStats MeasureNoise(NoiseType type, int32_t vinyl)
+{
+    Params p = Neutral();
+    p.vinyl = vinyl;
+    p.noise_type = type;
+    Chain chain;
+    chain.Init(p);
+    const auto out = Run(chain, std::vector<int32_t>(2 * 88000, 0));
+    double sum = 0, diff = 0;
+    int32_t peak = 0;
+    size_t count = 0;
+    for (size_t i = 44000; i < 88000; i++)
+    {
+        const double x = out[2 * i];
+        const double dx = x - out[2 * (i - 1)];
+        sum += x * x;
+        diff += dx * dx;
+        peak = std::max(peak, std::abs(out[2 * i]));
+        count++;
+    }
+    const double rms = std::sqrt(sum / count);
+    return {rms, rms > 0 ? std::sqrt(diff / count) / rms : 0.0, peak};
+}
+
+int TestNoiseTypes()
+{
+    // Hiss only (no crackle: a mid-low vinyl amount keeps pops rare enough to ignore in the brightness figure)
+    const NoiseStats high = MeasureNoise(NoiseType::HIGH_PITCH, 20000);
+    const NoiseStats low = MeasureNoise(NoiseType::LOW_PITCH, 20000);
+    const NoiseStats off = MeasureNoise(NoiseType::OFF, kParamMax);
+    std::printf("noise: high rms %.1f bright %.2f | low rms %.1f bright %.2f | off peak %d\n", high.rms, high.brightness,
+                low.rms, low.brightness, off.peak);
+    CHECK(off.peak == 0);
+    CHECK(high.rms > 5.0);
+    CHECK(low.rms > 5.0);
+    CHECK(high.brightness > 1.0);
+    CHECK(low.brightness < 0.5);
+    CHECK(high.brightness > low.brightness * 3.0);
+    // Comparable loudness (within about 6 dB) so the switch changes the colour, not the level
+    CHECK(low.rms < high.rms * 2.0 && low.rms > high.rms * 0.5);
+    // Stays bounded at the maximum vinyl amount
+    CHECK(MeasureNoise(NoiseType::LOW_PITCH, kParamMax).peak < 12000);
+    CHECK(MeasureNoise(NoiseType::HIGH_PITCH, kParamMax).peak < 12000);
+    return 0;
+}
+
+int TestNoiseSwitchLive()
+{
+    // Flipping the switch during playback fades the noise out, and back in, without leaving junk behind
+    Params p = Neutral();
+    p.vinyl = kParamMax;
+    Chain chain;
+    chain.Init(p);
+    Run(chain, std::vector<int32_t>(2 * 22000, 0));
+    p.noise_type = NoiseType::OFF;
+    chain.SetParams(p);
+    const auto faded = Run(chain, std::vector<int32_t>(2 * 22000, 0));
+    CHECK(Peak(faded, 20000) == 0);
+    p.noise_type = NoiseType::LOW_PITCH;
+    chain.SetParams(p);
+    const auto back = Run(chain, std::vector<int32_t>(2 * 22000, 0));
+    CHECK(Peak(back, 10000) > 20);
+    CHECK(Peak(back, 0) < 12000);
+    return 0;
+}
+
+// Magnitude of the pitch deviation (zero-crossing period of a sine) at one modulation frequency
+double DeviationAt(const std::vector<double> &times, const std::vector<double> &periods, double freq_hz)
+{
+    double c = 0, s = 0, mean = 0;
+    for (double p : periods)
+    {
+        mean += p;
+    }
+    mean /= periods.size();
+    for (size_t i = 0; i < periods.size(); i++)
+    {
+        const double phase = 2.0 * kPi * freq_hz * times[i] / kSampleRate;
+        c += (periods[i] - mean) * std::cos(phase);
+        s += (periods[i] - mean) * std::sin(phase);
+    }
+    return std::sqrt(c * c + s * s) / periods.size();
+}
+
+double WowSpeedDominantHz(WowSpeed speed, double *spread_out = nullptr)
+{
+    Params p = Neutral();
+    p.wow = kParamMax;
+    p.wow_speed = speed;
+    Chain chain;
+    chain.Init(p);
+    const auto out = Run(chain, Sine(44000 * 24, 880.0, 0.4));
+    std::vector<double> times, periods;
+    double last = -1.0;
+    for (size_t i = 44000 * 2; i < out.size() / 2; i++)
+    {
+        if (out[2 * (i - 1)] < 0 && out[2 * i] >= 0)
+        {
+            const double t = i - static_cast<double>(out[2 * i]) / (out[2 * i] - out[2 * (i - 1)]);
+            if (last >= 0)
+            {
+                times.push_back(t);
+                periods.push_back(t - last);
+            }
+            last = t;
+        }
+    }
+    if (spread_out)
+    {
+        double lo = 1e9, hi = -1e9;
+        for (double v : periods)
+        {
+            lo = std::min(lo, v);
+            hi = std::max(hi, v);
+        }
+        *spread_out = hi - lo;
+    }
+    double best = 0, best_hz = 0;
+    for (double hz = 0.1; hz < 2.0; hz += 0.02) // the wow band, flutter is faster
+    {
+        const double m = DeviationAt(times, periods, hz);
+        if (m > best)
+        {
+            best = m;
+            best_hz = hz;
+        }
+    }
+    return best_hz;
+}
+
+int TestWowSpeeds()
+{
+    double slow_spread = 0, medium_spread = 0, fast_spread = 0;
+    const double slow = WowSpeedDominantHz(WowSpeed::SLOW, &slow_spread);
+    const double medium = WowSpeedDominantHz(WowSpeed::MEDIUM, &medium_spread);
+    const double fast = WowSpeedDominantHz(WowSpeed::FAST, &fast_spread);
+    std::printf("wow speeds: slow %.2f Hz (spread %.2f), medium %.2f Hz (%.2f), fast %.2f Hz (%.2f)\n", slow, slow_spread,
+                medium, medium_spread, fast, fast_spread);
+    CHECK(slow > 0.15 && slow < 0.35);
+    CHECK(medium > 0.5 && medium < 0.7);
+    CHECK(fast > 1.1 && fast < 1.5);
+    // The depth is backed off for the fast setting, so no speed is wildly more detuned than another
+    CHECK(slow_spread < 5.0 && medium_spread < 5.0 && fast_spread < 5.0);
+    CHECK(fast_spread < medium_spread * 2.0 && slow_spread > 0.1);
+    return 0;
+}
+
+int TestWowSpeedOffStaysSteady()
+{
+    // With the wow knob at zero none of the speeds adds any wobble
+    for (WowSpeed speed : {WowSpeed::SLOW, WowSpeed::MEDIUM, WowSpeed::FAST})
+    {
+        Params p = Neutral();
+        p.wow_speed = speed;
+        Chain chain;
+        chain.Init(p);
+        CHECK(CrossingSpread(Run(chain, Sine(88000, 880.0, 0.4))) < 0.2);
+    }
+    return 0;
+}
+
+// ---- knob glide
+
+int TestKnobGlide()
+{
+    // First value and allow_glide=false snap
+    KnobGlide g;
+    CHECK(g.Update(5000, 100) == 5000);
+    CHECK(g.Update(30000, 110, false) == 30000);
+    CHECK(!g.IsGliding());
+
+    // Turning a knob normally tracks it exactly, with no lag
+    int32_t v = 30000;
+    uint32_t t = 200;
+    for (int i = 0; i < 100; i++)
+    {
+        v -= 100;
+        t += 2;
+        CHECK(g.Update(v, t) == v);
+    }
+    CHECK(!g.IsGliding());
+
+    // A jump (pick-up in another layer) glides over kGlideMs: monotonic, eased, ends exactly on the target
+    const int32_t from = v;
+    const int32_t to = 2000;
+    int32_t previous = g.Update(to, t + 2);
+    CHECK(g.IsGliding());
+    CHECK(previous > to && previous <= from);
+    CHECK(from - previous < (from - to) / 50); // starts slowly
+    int32_t halfway = 0;
+    for (uint32_t dt = 4; dt < KnobGlide::kGlideMs; dt += 2)
+    {
+        const int32_t now_value = g.Update(to, t + dt);
+        CHECK(now_value <= previous);
+        CHECK(now_value >= to);
+        previous = now_value;
+        if (dt == 126) // dt counts from the first update, which is 2 ms after t
+        {
+            halfway = now_value;
+        }
+    }
+    CHECK(std::abs(halfway - (from + to) / 2) < (from - to) / 20);
+    CHECK(g.Update(to, t + 2 + KnobGlide::kGlideMs) == to);
+    CHECK(!g.IsGliding());
+
+    // A knob moved a little while gliding drags the end point along
+    KnobGlide h;
+    h.Update(0, 0);
+    h.Update(20000, 10);
+    h.Update(20500, 100);
+    CHECK(h.Update(21000, 260) == 21000);
+
+    // A second jump during a glide restarts from the current value (no snap)
+    KnobGlide k;
+    k.Update(0, 0);
+    k.Update(30000, 10);
+    const int32_t mid = k.Update(30000, 100);
+    const int32_t restarted = k.Update(0, 102);
+    CHECK(std::abs(restarted - mid) < 800);
+    return 0;
+}
+
 int TestWidth()
 {
     // Mono signal is untouched by width, a one-sided signal collapses at width 0
@@ -501,6 +770,13 @@ const TestCase kTests[] = {
     {"lofi", TestLofi},
     {"wow", TestWow},
     {"vinyl", TestVinyl},
+    {"switch_map", TestSwitchMapping},
+    {"switch_debounce", TestSwitchDebounce},
+    {"noise_types", TestNoiseTypes},
+    {"noise_live", TestNoiseSwitchLive},
+    {"wow_speeds", TestWowSpeeds},
+    {"wow_steady", TestWowSpeedOffStaysSteady},
+    {"knob_glide", TestKnobGlide},
     {"width", TestWidth},
     {"limiter", TestLimiter},
     {"bypass", TestBypass},

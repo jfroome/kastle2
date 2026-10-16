@@ -12,6 +12,7 @@ export interface FirmwareInfo {
 
 export const FIRMWARES: FirmwareInfo[] = [
   { id: "masterblaster", name: "MasterBlaster", latencySamples: 96, generatesSound: false },
+  { id: "beads", name: "Beads", latencySamples: 0, generatesSound: false },
   { id: "wavebard", name: "Wave Bard", latencySamples: 0, generatesSound: true, userData: { file: "wavebard-samples.bin", label: "Wave Bard samples (SAMPLES.bin)" } },
   { id: "examplesynth", name: "Example Synth", latencySamples: 0, generatesSound: true },
   { id: "template", name: "Template (passthrough)", latencySamples: 0, generatesSound: false },

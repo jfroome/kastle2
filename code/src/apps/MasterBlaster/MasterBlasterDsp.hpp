@@ -35,6 +35,22 @@ namespace kastle2::masterblaster
 /// All parameters are 0..kParamMax.
 constexpr int32_t kParamMax = 32767;
 
+/// Character of the vinyl hiss and crackle (left panel switch). The HF rolloff of the Vinyl knob is not affected.
+enum class NoiseType : uint8_t
+{
+    LOW_PITCH = 0,  ///< Rumbly, low-passed hiss and soft thumps
+    HIGH_PITCH = 1, ///< Bright, hissy noise and sharp ticks
+    OFF = 2,        ///< No hiss and no crackle
+};
+
+/// Rate of the wow / drift / flutter modulation (right panel switch). The depth is still the SHIFT+K4 knob.
+enum class WowSpeed : uint8_t
+{
+    SLOW = 0,
+    MEDIUM = 1,
+    FAST = 2,
+};
+
 struct Params
 {
     int32_t drive = 8000;       ///< Input gain + saturation amount
@@ -48,6 +64,57 @@ struct Params
     int32_t mix = kParamMax;    ///< Dry/wet
     int32_t output = 23170;     ///< Output trim, ~0.707 = unity
     bool bypass = false;
+    NoiseType noise_type = NoiseType::HIGH_PITCH;
+    WowSpeed wow_speed = WowSpeed::MEDIUM;
+};
+
+/// Position of a 3-pole panel switch as the firmware reads it from its tri-state FEED input.
+/// UP drives the line high (printed RND), DOWN drives it low (printed INV), MIDDLE leaves it floating.
+enum class SwitchPosition : uint8_t
+{
+    DOWN = 0,
+    MIDDLE = 1,
+    UP = 2,
+};
+
+/// Left switch (CV): up = low-pitched noise, middle = high-pitched noise, down = off.
+NoiseType NoiseTypeFromSwitch(SwitchPosition position);
+
+/// Right switch (GATE): up = slow, middle = medium, down = fast.
+WowSpeed WowSpeedFromSwitch(SwitchPosition position);
+
+/// The FEED inputs float when a cable is patched and carries a signal, so a new position is only accepted once it
+/// has been stable for a while. The first reading is accepted immediately.
+class SwitchDebouncer
+{
+public:
+    static constexpr uint32_t kStableMs = 40;
+
+    SwitchPosition Update(SwitchPosition reading, uint32_t now_ms)
+    {
+        if (!has_value_)
+        {
+            has_value_ = true;
+            accepted_ = candidate_ = reading;
+            candidate_since_ms_ = now_ms;
+        }
+        else if (reading != candidate_)
+        {
+            candidate_ = reading;
+            candidate_since_ms_ = now_ms;
+        }
+        else if (candidate_ != accepted_ && now_ms - candidate_since_ms_ >= kStableMs)
+        {
+            accepted_ = candidate_;
+        }
+        return accepted_;
+    }
+
+private:
+    bool has_value_ = false;
+    SwitchPosition accepted_ = SwitchPosition::MIDDLE;
+    SwitchPosition candidate_ = SwitchPosition::MIDDLE;
+    uint32_t candidate_since_ms_ = 0;
 };
 
 /// 0..4095 pot to 0..kParamMax.
@@ -78,6 +145,66 @@ public:
 
 private:
     bool knob_moved_ = false;
+};
+
+/// Smooths knob jumps. A knob that is being turned follows immediately, but a jump (the knob picked up in another layer
+/// with SHIFT or MODE, a preset, a pot returning from frozen) glides over kGlideMs with an ease-in/ease-out curve
+/// instead of snapping, which would give harsh transients in things like the lo-fi bit depth or the drive.
+class KnobGlide
+{
+public:
+    static constexpr uint32_t kGlideMs = 250;
+    static constexpr int32_t kJumpThreshold = 1600; ///< About 5 % of the range in one UI pass
+
+    /// @param allow_glide False snaps straight to the target (start-up)
+    int32_t Update(int32_t target, uint32_t now_ms, bool allow_glide = true)
+    {
+        if (!has_value_ || !allow_glide)
+        {
+            has_value_ = true;
+            gliding_ = false;
+            last_target_ = value_ = target;
+            return value_;
+        }
+        const int32_t step = target > last_target_ ? target - last_target_ : last_target_ - target;
+        last_target_ = target;
+        if (step > kJumpThreshold)
+        {
+            start_ = value_;
+            start_ms_ = now_ms;
+            gliding_ = true;
+        }
+        if (!gliding_)
+        {
+            value_ = target;
+            return value_;
+        }
+        const uint32_t elapsed = now_ms - start_ms_;
+        if (elapsed >= kGlideMs)
+        {
+            gliding_ = false;
+            value_ = target;
+            return value_;
+        }
+        // Smoothstep of the elapsed fraction. The end point follows the knob if it keeps moving during the glide.
+        const int64_t p = (static_cast<int64_t>(elapsed) << 15) / kGlideMs;
+        const int64_t eased = (((p * p) >> 15) * ((3 << 15) - 2 * p)) >> 15;
+        value_ = start_ + static_cast<int32_t>(((static_cast<int64_t>(target) - start_) * eased) >> 15);
+        return value_;
+    }
+
+    bool IsGliding() const
+    {
+        return gliding_;
+    }
+
+private:
+    bool has_value_ = false;
+    bool gliding_ = false;
+    int32_t value_ = 0;
+    int32_t last_target_ = 0;
+    int32_t start_ = 0;
+    uint32_t start_ms_ = 0;
 };
 
 class Chain
@@ -141,8 +268,14 @@ private:
         int32_t wow_depth = 0;      // Q8 samples
         int32_t lowpass_coef = 32767;
         int32_t noise_amp = 0;
+        int32_t noise_tilt = 0;     // Q15, > 0 brightens the noise (first difference)
+        int32_t noise_lp_coef = 32767; // Q15 one-pole low-pass on noise and pops, 32767 = bypassed
+        int32_t pop_decay = 26000;  // Q15 per sample
         int32_t crackle_thresh = 0;
         int32_t crackle_amp = 0;
+        int32_t wow_inc = 0;        // Phase increments of the three modulators
+        int32_t drift_inc = 0;
+        int32_t flutter_inc = 0;
         int32_t lofi_step = 256; // Q8 phase increment
         int32_t width_gain = 4096;
         int32_t mix = 32768;
@@ -171,6 +304,8 @@ private:
     uint32_t wow_phase_ = 0, flutter_phase_ = 0, drift_phase_ = 0;
     int32_t vinyl_lp_left_ = 0, vinyl_lp_right_ = 0;
     int32_t pop_ = 0;
+    int32_t noise_prev_left_ = 0, noise_prev_right_ = 0;
+    int32_t noise_lp_left_ = 0, noise_lp_right_ = 0;
     uint32_t rng_ = 0x1234567u;
     int32_t lofi_phase_ = 0;
     int32_t lofi_shift_ = 0;

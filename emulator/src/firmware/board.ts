@@ -205,6 +205,11 @@ export class FirmwareBoard {
     this.panel.buttons[button] = down;
   }
 
+  /** The firmware's calibrated reading (ADC units, 819 per volt) of a PITCH jack. */
+  pitchAdc(jack: "PITCH_1" | "PITCH_2"): number {
+    return this.x.fw_analog_value(jack === "PITCH_1" ? 0 : 1);
+  }
+
   setVolts(jack: JackName, volts: number | undefined): void {
     if (volts === undefined) delete this.panel.volts[jack];
     else this.panel.volts[jack] = volts;

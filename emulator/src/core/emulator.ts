@@ -18,8 +18,8 @@ import { PERFORMANCES, type Performance } from "../firmware/performance";
 import { getFirmwareInfo, type FirmwareInfo } from "../firmware/registry";
 import { renderFirmware } from "../firmware/runner";
 import { cvVoltsAt, defaultCv, type CvChannel } from "./cv";
-import type { ControlSpec, FirmwareApp, Preset } from "./app";
-import { controlDefaults } from "./app";
+import type { ControlSpec, FirmwareApp, Preset, SwitchPosition } from "./app";
+import { controlDefaults, switchVolts } from "./app";
 import { PARAM_MAX } from "./constants";
 
 export interface RenderReport {
@@ -57,6 +57,8 @@ export class Emulator {
     audioInPlugged: true,
   };
   cv: Record<string, CvChannel> = {};
+  /** Positions of the 3-pole panel switches by FEED input. Missing = middle. */
+  switches: Partial<Record<"FEED_1" | "FEED_3", SwitchPosition>> = {};
 
   app!: FirmwareApp;
   info!: FirmwareInfo;
@@ -143,6 +145,7 @@ export class Emulator {
     this.cv = {};
     for (const j of this.app.jacks) this.cv[j.input] = defaultCv();
     this.panel.volts = {};
+    this.switches = {};
     this.panel.buttons = { SHIFT: false, MODE: false };
     this.panel.trig = false;
     this.frozenAt = new Array(7).fill(null);
@@ -317,6 +320,16 @@ export class Emulator {
     this.emit();
   }
 
+  switchPosition(input: "FEED_1" | "FEED_3"): SwitchPosition {
+    return this.switches[input] ?? 1;
+  }
+
+  setSwitch(input: "FEED_1" | "FEED_3", position: SwitchPosition): void {
+    this.switches[input] = position;
+    this.scheduleAutoRender();
+    this.emit();
+  }
+
   setAnalog(patch: Partial<AnalogOptions>): void {
     this.analog = { ...this.analog, ...patch };
     this.engine.sendAnalog(this.analog);
@@ -339,6 +352,11 @@ export class Emulator {
       const j = jack as JackName;
       if (ch.patched) this.panel.volts[j] = cvVoltsAt(ch, t);
       else delete this.panel.volts[j];
+    }
+    for (const sw of this.app.switches ?? []) {
+      const volts = switchVolts(this.switchPosition(sw.input));
+      if (volts === undefined) delete this.panel.volts[sw.input];
+      else this.panel.volts[sw.input] = volts;
     }
     this.pushPanel();
   }
@@ -416,6 +434,7 @@ export class Emulator {
   async renderOffline(opts: { seconds?: number } = {}): Promise<StereoSignal> {
     const board = await this.newBoard();
     const cv = this.cv;
+    const switches = (this.app.switches ?? []).map((sw) => ({ input: sw.input, volts: switchVolts(this.switchPosition(sw.input)) }));
     const performanceRun = this.info.generatesSound ? this.performance : null;
     const input = this.info.generatesSound ? null : this.track;
     return renderFirmware(board, input, {
@@ -427,6 +446,7 @@ export class Emulator {
         for (const [jack, ch] of Object.entries(cv)) {
           if (ch.patched) b.setVolts(jack as JackName, cvVoltsAt(ch, t));
         }
+        for (const sw of switches) b.setVolts(sw.input, sw.volts);
         performanceRun?.beforeBlock(t, b);
       },
       onProgress: (f) => {

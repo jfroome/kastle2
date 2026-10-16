@@ -44,7 +44,7 @@ export function Transport() {
       }}
     >
       <div className="brand">
-        <strong>MasterBlaster Test Bench</strong>
+        <strong>Citadel Firmware Test Bench</strong>
         <span>the real Citadel firmware (Base + app) as WebAssembly @ 44 kHz</span>
       </div>
 
@@ -122,7 +122,7 @@ export function Transport() {
       <button className="deliver" onClick={() => setDeliver(true)} title="Flash this firmware onto a physical Citadel">
         📟 Deliver to Citadel
       </button>
-      {deliver && <DeliverDialog onClose={() => setDeliver(false)} />}
+      {deliver && <DeliverDialog appId={emu.app.id} onClose={() => setDeliver(false)} />}
 
       <div className="now">
         {emu.track ? (
